@@ -10,7 +10,7 @@ import { z } from "zod";
 
 // --- enums ------------------------------------------------------------------
 
-export type SqKind = "sql_query" | "data_health_check";
+export type SqKind = "sql_query" | "data_health_check" | "visual_pipeline";
 /** `event` runs are started by a successful upstream materialize run (ADR 0006). */
 export type SqTrigger = "scheduled" | "manual" | "event";
 /**

@@ -15,6 +15,7 @@ import fleet from "./fleet";
 import alerting from "./alerting";
 import scheduledQueries from "./scheduled-queries";
 import dataHealth from "./data-health";
+import pipelines from "./pipelines";
 import queryHistory from "./query-history";
 
 const api = new Hono();
@@ -47,7 +48,8 @@ const apiProtectionMiddleware = async (c: Context, next: Next) => {
     "/api/rbac/auth/sso",
     "/api/rbac/health",
   ];
-  if (publicPaths.some(p => path === p || path.startsWith(p + "/"))) {
+  const isPipelineWebhook = c.req.method === "POST" && /^\/api\/pipelines\/[^/]+\/webhook$/.test(path);
+  if (isPipelineWebhook || publicPaths.some(p => path === p || path.startsWith(p + "/"))) {
     await next();
     return;
   }
@@ -95,6 +97,7 @@ api.route("/fleet", fleet);
 api.route("/alerting", alerting);
 api.route("/scheduled-queries", scheduledQueries);
 api.route("/data-health", dataHealth);
+api.route("/pipelines", pipelines);
 api.route("/query-history", queryHistory);
 
 // RBAC routes (Role-Based Access Control)

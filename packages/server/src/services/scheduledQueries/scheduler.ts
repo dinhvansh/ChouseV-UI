@@ -141,7 +141,24 @@ export class ScheduledQueryScheduler {
           const won = await store.claimSlot(item.job.id, item.fireAt, now, runner.RUNNER_ID);
           if (!won) continue; // another pod/tick took it
           const attempt = (await store.countRunsForSlot(item.job.id, item.fireAt)) + 1;
-          await runner.execute(item.job, { trigger: "scheduled", slotAt: item.fireAt, attempt });
+          if (item.job.kind === "visual_pipeline") {
+            const [pipelineStore, pipelineRuntime] = await Promise.all([
+              import("../pipelines/store"),
+              import("../pipelines/runtime"),
+            ]);
+            const deployment = await pipelineStore.getDeploymentByRuntimeJobId(item.job.id);
+            if (!deployment || deployment.status !== "ACTIVE") continue;
+            await pipelineRuntime.executeDeployment(deployment, {
+              actorId: null,
+              triggerType: "scheduled",
+              triggerPayload: null,
+              externalEventId: null,
+              slotAt: item.fireAt,
+              attempt,
+            });
+          } else {
+            await runner.execute(item.job, { trigger: "scheduled", slotAt: item.fireAt, attempt });
+          }
         } catch (err) {
           logger.error(
             { module: "ScheduledQueries", jobId: item.job.id, err: err instanceof Error ? err.message : String(err) },

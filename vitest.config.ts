@@ -11,6 +11,9 @@ export default defineConfig({
     },
   },
   test: {
+    // Backend suites use Bun's test runner and must stay isolated from Vitest's
+    // browser transform (which cannot import the `bun:test` protocol).
+    include: ['src/**/*.test.{ts,tsx}'],
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],

@@ -24,6 +24,10 @@ import { AUDIT_ACTIONS, PERMISSIONS } from "../rbac/schema/base";
 import type { Permission } from "../rbac/schema/base";
 import { getClientIp } from "../rbac/middleware/rbacAuth";
 import { requestLogger } from "../utils/logger";
+import { getUserConnections } from "../rbac/services/connections";
+import { checkTableAccess } from "../middleware/dataAccess";
+import { clientForConnection } from "../services/scheduledQueries/chClient";
+import * as pipelineStore from "../services/pipelines/store";
 
 const ai = new Hono<{ Variables: Variables }>();
 
@@ -154,6 +158,112 @@ ai.get("/models", async (c) => {
   } catch {
     return c.json({ success: true, data: [] });
   }
+});
+
+/**
+ * A field-allowlisted, credential-free context bundle for pipeline assistants.
+ * This endpoint only exposes metadata, immutable definitions/SQL, and run
+ * diagnostics; it never returns connection configuration or sample rows.
+ */
+ai.get("/context/pipelines/:id", async (c) => {
+  await requireCapabilityPermission(c, PERMISSIONS.PIPELINES_VIEW);
+  await requireCapabilityPermission(c, PERMISSIONS.PIPELINES_AI_SUGGEST);
+  const id = c.req.param("id");
+  const pipeline = await pipelineStore.getPipelineDetail(id);
+  const userId = c.get("rbacUserId");
+  const isAdmin = c.get("isRbacAdmin") ?? false;
+  const canViewAll = isAdmin || (c.get("rbacPermissions") ?? []).includes(PERMISSIONS.PIPELINES_VIEW_ALL);
+  if (!pipeline || (!canViewAll && pipeline.createdBy !== userId)) {
+    throw AppError.notFound("Visual pipeline not found");
+  }
+  if (!isAdmin) {
+    if (!userId) throw AppError.unauthorized("RBAC authentication is required.");
+    const connections = await getUserConnections(userId);
+    if (!connections.some((connection) => connection.id === pipeline.connectionId)) {
+      throw AppError.forbidden("You do not have access to this pipeline connection");
+    }
+  }
+
+  const version = pipeline.draft;
+  const client = await clientForConnection(
+    pipeline.connectionId,
+    JSON.stringify({ rbac_user_id: userId ?? null, source: "pipeline_ai_context", pipeline_id: pipeline.id }),
+  );
+  const schemaFor = async (database: string, table: string, access: "read" | "write") => {
+    const allowed = await checkTableAccess(userId, isAdmin, database, table, pipeline.connectionId, access);
+    if (!allowed) return { database, table, accessible: false, columns: [] as Array<{ name: string; type: string }> };
+    const result = await client.query({
+      query: "SELECT name, type FROM system.columns WHERE database = {database:String} AND table = {table:String} ORDER BY position",
+      format: "JSON",
+      query_params: { database, table },
+      clickhouse_settings: { readonly: "1", max_execution_time: 10, max_result_rows: "10000" },
+    });
+    const json = await result.json() as { data?: Array<{ name: string; type: string }> };
+    return { database, table, accessible: true, columns: json.data ?? [] };
+  };
+  const sources = version?.definition.nodes.filter((node) => node.type === "source") ?? [];
+  const destination = version?.definition.nodes.find((node) => node.type === "destination");
+  const sourceSchemas = await Promise.all(sources.map((node) => schemaFor(node.config.database, node.config.table, "read")));
+  const destinationSchema = destination?.type === "destination"
+    ? await schemaFor(destination.config.database, destination.config.table, "write")
+    : null;
+  const runs = await pipelineStore.listPipelineRuns(pipeline.id, 20, 0);
+  const safeRun = (run: (typeof runs)[number] | undefined) => run ? {
+    id: run.id,
+    versionId: run.versionId,
+    deploymentId: run.deploymentId,
+    triggerType: run.triggerType,
+    externalEventId: run.externalEventId,
+    status: run.status,
+    rowCount: run.rowCount,
+    writtenRows: run.writtenRows,
+    durationMs: run.durationMs,
+    errorMessage: run.errorMessage,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+  } : null;
+  const lastExecution = safeRun(runs[0]);
+  const lastError = safeRun(runs.find((run) => run.status === "failed" || run.errorMessage));
+  const metadata = await pipelineStore.listBusinessMetadata(pipeline.id);
+  const deployment = await pipelineStore.getActiveDeployment(pipeline.id);
+
+  return c.json({
+    success: true,
+    data: {
+      pipeline: {
+        id: pipeline.id,
+        name: pipeline.name,
+        description: pipeline.description,
+        activeDeploymentId: pipeline.activeDeploymentId,
+      },
+      pipelineVersion: version ? {
+        id: version.id,
+        versionNumber: version.versionNumber,
+        status: version.status,
+        definitionHash: version.definitionHash,
+        compilerVersion: version.compilerVersion,
+        definition: version.definition,
+        outputSchema: version.outputSchema,
+        lineage: version.lineage,
+        diagnostics: version.diagnostics,
+      } : null,
+      sourceSchemas,
+      destinationSchema,
+      businessMetadata: metadata,
+      generatedSql: version?.generatedSql ?? null,
+      deployment: deployment ? {
+        id: deployment.id,
+        versionId: deployment.versionId,
+        triggerType: deployment.triggerType,
+        triggerConfig: deployment.triggerConfig,
+        artifactChecksum: deployment.artifactChecksum,
+        status: deployment.status,
+        deployedAt: deployment.deployedAt,
+      } : null,
+      lastExecution,
+      lastError,
+    },
+  });
 });
 
 ai.post("/feedback", async (c) => {

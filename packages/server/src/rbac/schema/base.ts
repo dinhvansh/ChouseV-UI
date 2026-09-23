@@ -167,6 +167,17 @@ export const PERMISSIONS = {
   DATA_HEALTH_DELETE: 'data_health:delete',
   DATA_HEALTH_RUN: 'data_health:run',
   DATA_HEALTH_VIEW_ALL: 'data_health:view_all',
+
+  // Visual Pipelines (DataOps — versioned visual ClickHouse transforms)
+  PIPELINES_VIEW: 'pipelines:view',
+  PIPELINES_VIEW_ALL: 'pipelines:view_all',
+  PIPELINES_EDIT: 'pipelines:edit',
+  PIPELINES_TEST: 'pipelines:test',
+  PIPELINES_RUN: 'pipelines:run',
+  PIPELINES_DEPLOY: 'pipelines:deploy',
+  PIPELINES_DELETE: 'pipelines:delete',
+  PIPELINES_METADATA: 'pipelines:metadata',
+  PIPELINES_AI_SUGGEST: 'pipelines:ai_suggest',
 } as const;
 
 export type Permission = typeof PERMISSIONS[keyof typeof PERMISSIONS];
@@ -249,6 +260,15 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<SystemRole, Permission[]> = {
     PERMISSIONS.DATA_HEALTH_DELETE,
     PERMISSIONS.DATA_HEALTH_RUN,
     PERMISSIONS.DATA_HEALTH_VIEW_ALL,
+    PERMISSIONS.PIPELINES_VIEW,
+    PERMISSIONS.PIPELINES_VIEW_ALL,
+    PERMISSIONS.PIPELINES_EDIT,
+    PERMISSIONS.PIPELINES_TEST,
+    PERMISSIONS.PIPELINES_RUN,
+    PERMISSIONS.PIPELINES_DEPLOY,
+    PERMISSIONS.PIPELINES_DELETE,
+    PERMISSIONS.PIPELINES_METADATA,
+    PERMISSIONS.PIPELINES_AI_SUGGEST,
   ],
 
   [SYSTEM_ROLES.DEVELOPER]: [
@@ -507,6 +527,19 @@ export const AUDIT_ACTIONS = {
   DATA_HEALTH_INCIDENT_ACKNOWLEDGE: 'data_health.incident_acknowledge',
   DATA_HEALTH_INCIDENT_SNOOZE: 'data_health.incident_snooze',
   DATA_HEALTH_INCIDENT_NOTE: 'data_health.incident_note',
+
+  // Visual Pipelines
+  PIPELINE_CREATE: 'pipeline.create',
+  PIPELINE_VERSION_CREATE: 'pipeline.version_create',
+  PIPELINE_DRAFT_UPDATE: 'pipeline.draft_update',
+  PIPELINE_VALIDATE: 'pipeline.validate',
+  PIPELINE_TEST: 'pipeline.test',
+  PIPELINE_DEPLOY: 'pipeline.deploy',
+  PIPELINE_RUN: 'pipeline.run',
+  PIPELINE_ROLLBACK: 'pipeline.rollback',
+  PIPELINE_DELETE: 'pipeline.delete',
+  PIPELINE_METADATA_UPDATE: 'pipeline.metadata_update',
+  PIPELINE_WEBHOOK_SECRET_ROTATE: 'pipeline.webhook_secret_rotate',
 } as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[keyof typeof AUDIT_ACTIONS];

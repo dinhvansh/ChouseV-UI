@@ -318,6 +318,44 @@ const VERSION_CHECKS: Record<string, () => Promise<void>> = {
       await h.rawRun(sql`DELETE FROM rbac_api_keys WHERE id = ${probeId}`);
     }
   },
+  "1.53.0": async () => {
+    const expectedTables = [
+      "visual_pipelines",
+      "visual_pipeline_versions",
+      "visual_pipeline_deployments",
+      "visual_pipeline_external_events",
+      "visual_pipeline_business_metadata",
+      "visual_pipeline_native_runs",
+      "visual_pipeline_run_links",
+      "visual_pipeline_run_leases",
+    ];
+    const tableRows = getDatabaseType() === "sqlite"
+      ? await h.rawAll(sql.raw("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'visual_pipeline%'"))
+      : await h.rawAll(sql.raw("SELECT table_name AS name FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'visual_pipeline%'"));
+    expect(new Set(tableRows.map((row) => String(row.name)))).toEqual(new Set(expectedTables));
+
+    const indexRows = getDatabaseType() === "sqlite"
+      ? await h.rawAll(sql.raw("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'vp_%'"))
+      : await h.rawAll(sql.raw("SELECT indexname AS name FROM pg_indexes WHERE schemaname='public' AND indexname LIKE 'vp_%'"));
+    const indexes = new Set(indexRows.map((row) => String(row.name)));
+    expect(indexes.has("vp_connection_idx")).toBe(true);
+    expect(indexes.has("vp_versions_pipeline_idx")).toBe(true);
+    expect(indexes.has("vp_deployments_runtime_job_idx")).toBe(true);
+    expect(indexes.has("vp_external_events_status_idx")).toBe(true);
+    expect(indexes.has("vp_metadata_pipeline_idx")).toBe(true);
+    expect(indexes.has("vp_native_runs_deployment_idx")).toBe(true);
+    expect(indexes.has("vp_run_links_pipeline_idx")).toBe(true);
+    expect(indexes.has("vp_run_leases_expiry_idx")).toBe(true);
+
+    const grantRows = await h.rawAll(sql`
+      SELECT p.name AS permission_name, r.name AS role_name
+      FROM rbac_permissions p
+      JOIN rbac_role_permissions rp ON rp.permission_id = p.id
+      JOIN rbac_roles r ON r.id = rp.role_id
+      WHERE p.name LIKE 'pipelines:%' AND r.name IN ('super_admin', 'admin')
+    `);
+    expect(new Set(grantRows.map((row) => `${String(row.role_name)}:${String(row.permission_name)}`)).size).toBe(18);
+  },
 };
 
 // ---------------------------------------------------------------------------

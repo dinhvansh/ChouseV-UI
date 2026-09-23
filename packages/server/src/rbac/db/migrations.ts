@@ -45,7 +45,7 @@ export interface MigrationResult {
 // Current App Version
 // ============================================
 
-export const APP_VERSION = '1.52.0';
+export const APP_VERSION = '1.53.0';
 
 // ============================================
 // Error Helpers
@@ -4722,6 +4722,348 @@ export const MIGRATIONS: Migration[] = [
         ALTER TABLE rbac_api_keys ALTER COLUMN scopes SET DEFAULT '[]'::jsonb
       `);
       logger.info({ module: 'RBAC', phase: 'migration' }, `[Migration 1.52.0] Converted rbac_api_keys.scopes to JSONB (${dbType})`);
+    },
+    down: async () => { /* forward-only */ },
+  },
+  {
+    version: '1.53.0',
+    name: 'visual_transformation_pipelines',
+    description: 'ADR 0015 — add versioned Visual Pipeline definitions, immutable deployments, webhook idempotency, business metadata, native MV observations, and pipelines:* permissions.',
+    up: async (db) => {
+      const dbType = getDatabaseType();
+      if (dbType === 'sqlite') {
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipelines (
+            id                           TEXT PRIMARY KEY NOT NULL,
+            name                         TEXT NOT NULL,
+            description                  TEXT,
+            connection_id                TEXT NOT NULL,
+            current_draft_version_id     TEXT,
+            active_deployment_id         TEXT,
+            created_by                   TEXT,
+            created_at                   INTEGER NOT NULL DEFAULT 0,
+            updated_at                   INTEGER NOT NULL DEFAULT 0,
+            archived_at                  INTEGER
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_connection_idx ON visual_pipelines (connection_id, archived_at)`);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_owner_idx ON visual_pipelines (created_by, archived_at)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_versions (
+            id                 TEXT PRIMARY KEY NOT NULL,
+            pipeline_id        TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_number     INTEGER NOT NULL,
+            schema_version     INTEGER NOT NULL,
+            definition_json    TEXT NOT NULL,
+            definition_hash    TEXT NOT NULL,
+            compiler_version   TEXT,
+            generated_sql      TEXT,
+            output_schema_json TEXT,
+            lineage_json       TEXT,
+            diagnostics_json   TEXT,
+            status             TEXT NOT NULL DEFAULT 'DRAFT',
+            created_by         TEXT,
+            created_at         INTEGER NOT NULL DEFAULT 0,
+            validated_at       INTEGER,
+            tested_at          INTEGER,
+            UNIQUE (pipeline_id, version_number)
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_versions_pipeline_idx ON visual_pipeline_versions (pipeline_id, version_number)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_deployments (
+            id                       TEXT PRIMARY KEY NOT NULL,
+            pipeline_id              TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_id               TEXT NOT NULL REFERENCES visual_pipeline_versions(id) ON DELETE RESTRICT,
+            connection_id            TEXT NOT NULL,
+            trigger_type             TEXT NOT NULL,
+            trigger_config_json      TEXT,
+            artifact_json            TEXT NOT NULL,
+            artifact_checksum        TEXT NOT NULL,
+            runtime_job_id           TEXT REFERENCES scheduled_queries(id) ON DELETE SET NULL,
+            native_object_name       TEXT,
+            native_object_uuid       TEXT,
+            webhook_secret_encrypted TEXT,
+            status                   TEXT NOT NULL DEFAULT 'ACTIVE',
+            deployed_by              TEXT,
+            deployed_at              INTEGER NOT NULL DEFAULT 0,
+            retired_by               TEXT,
+            retired_at               INTEGER
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_deployments_pipeline_idx ON visual_pipeline_deployments (pipeline_id, deployed_at)`);
+        (db as SqliteDb).run(sql`CREATE UNIQUE INDEX IF NOT EXISTS vp_deployments_runtime_job_idx ON visual_pipeline_deployments (runtime_job_id) WHERE runtime_job_id IS NOT NULL`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_external_events (
+            id                TEXT PRIMARY KEY NOT NULL,
+            pipeline_id       TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            source            TEXT NOT NULL,
+            external_event_id TEXT NOT NULL,
+            payload_hash      TEXT NOT NULL,
+            payload_json      TEXT,
+            signature_valid   INTEGER NOT NULL DEFAULT 0,
+            received_at       INTEGER NOT NULL DEFAULT 0,
+            processed_at      INTEGER,
+            status            TEXT NOT NULL,
+            UNIQUE (pipeline_id, source, external_event_id)
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_external_events_status_idx ON visual_pipeline_external_events (status, received_at)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_business_metadata (
+            id                  TEXT PRIMARY KEY NOT NULL,
+            pipeline_id         TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            entity_type         TEXT NOT NULL,
+            entity_key          TEXT NOT NULL,
+            description         TEXT,
+            business_owner      TEXT,
+            data_owner          TEXT,
+            sensitivity         TEXT,
+            source_system       TEXT,
+            refresh_frequency   TEXT,
+            business_definition TEXT,
+            created_at          INTEGER NOT NULL DEFAULT 0,
+            updated_at          INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (pipeline_id, entity_type, entity_key)
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_metadata_pipeline_idx ON visual_pipeline_business_metadata (pipeline_id, entity_type)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_native_runs (
+            id               TEXT PRIMARY KEY NOT NULL,
+            deployment_id    TEXT NOT NULL REFERENCES visual_pipeline_deployments(id) ON DELETE CASCADE,
+            connection_id    TEXT NOT NULL,
+            view_uuid        TEXT NOT NULL,
+            initial_query_id TEXT NOT NULL,
+            event_time_ms    INTEGER NOT NULL,
+            status           TEXT NOT NULL,
+            duration_ms      INTEGER,
+            read_rows        INTEGER,
+            written_rows     INTEGER,
+            error_code       TEXT,
+            error_message    TEXT,
+            observed_at      INTEGER NOT NULL DEFAULT 0,
+            UNIQUE (connection_id, view_uuid, initial_query_id, event_time_ms)
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_native_runs_deployment_idx ON visual_pipeline_native_runs (deployment_id, event_time_ms)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_run_links (
+            run_id               TEXT PRIMARY KEY NOT NULL REFERENCES scheduled_query_runs(id) ON DELETE CASCADE,
+            pipeline_id          TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_id           TEXT NOT NULL REFERENCES visual_pipeline_versions(id) ON DELETE RESTRICT,
+            deployment_id        TEXT REFERENCES visual_pipeline_deployments(id) ON DELETE SET NULL,
+            actor_id             TEXT,
+            trigger_type         TEXT NOT NULL,
+            trigger_payload_json TEXT,
+            external_event_id    TEXT,
+            generated_sql        TEXT NOT NULL,
+            created_at           INTEGER NOT NULL DEFAULT 0
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_run_links_pipeline_idx ON visual_pipeline_run_links (pipeline_id, created_at)`);
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_run_leases (
+            pipeline_id         TEXT PRIMARY KEY NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            token               TEXT NOT NULL,
+            expires_at          INTEGER NOT NULL,
+            queued_payload_json TEXT,
+            updated_at          INTEGER NOT NULL DEFAULT 0
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_run_leases_expiry_idx ON visual_pipeline_run_leases (expires_at)`);
+      } else {
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipelines (
+            id                           TEXT PRIMARY KEY NOT NULL,
+            name                         TEXT NOT NULL,
+            description                  TEXT,
+            connection_id                TEXT NOT NULL,
+            current_draft_version_id     TEXT,
+            active_deployment_id         TEXT,
+            created_by                   TEXT,
+            created_at                   BIGINT NOT NULL DEFAULT 0,
+            updated_at                   BIGINT NOT NULL DEFAULT 0,
+            archived_at                  BIGINT
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_connection_idx ON visual_pipelines (connection_id, archived_at)`);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_owner_idx ON visual_pipelines (created_by, archived_at)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_versions (
+            id                 TEXT PRIMARY KEY NOT NULL,
+            pipeline_id        TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_number     INTEGER NOT NULL,
+            schema_version     INTEGER NOT NULL,
+            definition_json    TEXT NOT NULL,
+            definition_hash    TEXT NOT NULL,
+            compiler_version   TEXT,
+            generated_sql      TEXT,
+            output_schema_json TEXT,
+            lineage_json       TEXT,
+            diagnostics_json   TEXT,
+            status             TEXT NOT NULL DEFAULT 'DRAFT',
+            created_by         TEXT,
+            created_at         BIGINT NOT NULL DEFAULT 0,
+            validated_at       BIGINT,
+            tested_at          BIGINT,
+            UNIQUE (pipeline_id, version_number)
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_versions_pipeline_idx ON visual_pipeline_versions (pipeline_id, version_number)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_deployments (
+            id                       TEXT PRIMARY KEY NOT NULL,
+            pipeline_id              TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_id               TEXT NOT NULL REFERENCES visual_pipeline_versions(id) ON DELETE RESTRICT,
+            connection_id            TEXT NOT NULL,
+            trigger_type             TEXT NOT NULL,
+            trigger_config_json      TEXT,
+            artifact_json            TEXT NOT NULL,
+            artifact_checksum        TEXT NOT NULL,
+            runtime_job_id           TEXT REFERENCES scheduled_queries(id) ON DELETE SET NULL,
+            native_object_name       TEXT,
+            native_object_uuid       TEXT,
+            webhook_secret_encrypted TEXT,
+            status                   TEXT NOT NULL DEFAULT 'ACTIVE',
+            deployed_by              TEXT,
+            deployed_at              BIGINT NOT NULL DEFAULT 0,
+            retired_by               TEXT,
+            retired_at               BIGINT
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_deployments_pipeline_idx ON visual_pipeline_deployments (pipeline_id, deployed_at)`);
+        await (db as PostgresDb).execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS vp_deployments_runtime_job_idx ON visual_pipeline_deployments (runtime_job_id) WHERE runtime_job_id IS NOT NULL`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_external_events (
+            id                TEXT PRIMARY KEY NOT NULL,
+            pipeline_id       TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            source            TEXT NOT NULL,
+            external_event_id TEXT NOT NULL,
+            payload_hash      TEXT NOT NULL,
+            payload_json      TEXT,
+            signature_valid   INTEGER NOT NULL DEFAULT 0,
+            received_at       BIGINT NOT NULL DEFAULT 0,
+            processed_at      BIGINT,
+            status            TEXT NOT NULL,
+            UNIQUE (pipeline_id, source, external_event_id)
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_external_events_status_idx ON visual_pipeline_external_events (status, received_at)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_business_metadata (
+            id                  TEXT PRIMARY KEY NOT NULL,
+            pipeline_id         TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            entity_type         TEXT NOT NULL,
+            entity_key          TEXT NOT NULL,
+            description         TEXT,
+            business_owner      TEXT,
+            data_owner          TEXT,
+            sensitivity         TEXT,
+            source_system       TEXT,
+            refresh_frequency   TEXT,
+            business_definition TEXT,
+            created_at          BIGINT NOT NULL DEFAULT 0,
+            updated_at          BIGINT NOT NULL DEFAULT 0,
+            UNIQUE (pipeline_id, entity_type, entity_key)
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_metadata_pipeline_idx ON visual_pipeline_business_metadata (pipeline_id, entity_type)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_native_runs (
+            id               TEXT PRIMARY KEY NOT NULL,
+            deployment_id    TEXT NOT NULL REFERENCES visual_pipeline_deployments(id) ON DELETE CASCADE,
+            connection_id    TEXT NOT NULL,
+            view_uuid        TEXT NOT NULL,
+            initial_query_id TEXT NOT NULL,
+            event_time_ms    BIGINT NOT NULL,
+            status           TEXT NOT NULL,
+            duration_ms      BIGINT,
+            read_rows        BIGINT,
+            written_rows     BIGINT,
+            error_code       TEXT,
+            error_message    TEXT,
+            observed_at      BIGINT NOT NULL DEFAULT 0,
+            UNIQUE (connection_id, view_uuid, initial_query_id, event_time_ms)
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_native_runs_deployment_idx ON visual_pipeline_native_runs (deployment_id, event_time_ms)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_run_links (
+            run_id               TEXT PRIMARY KEY NOT NULL REFERENCES scheduled_query_runs(id) ON DELETE CASCADE,
+            pipeline_id          TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            version_id           TEXT NOT NULL REFERENCES visual_pipeline_versions(id) ON DELETE RESTRICT,
+            deployment_id        TEXT REFERENCES visual_pipeline_deployments(id) ON DELETE SET NULL,
+            actor_id             TEXT,
+            trigger_type         TEXT NOT NULL,
+            trigger_payload_json TEXT,
+            external_event_id    TEXT,
+            generated_sql        TEXT NOT NULL,
+            created_at           BIGINT NOT NULL DEFAULT 0
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_run_links_pipeline_idx ON visual_pipeline_run_links (pipeline_id, created_at)`);
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_run_leases (
+            pipeline_id         TEXT PRIMARY KEY NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            token               TEXT NOT NULL,
+            expires_at          BIGINT NOT NULL,
+            queued_payload_json TEXT,
+            updated_at          BIGINT NOT NULL DEFAULT 0
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_run_leases_expiry_idx ON visual_pipeline_run_leases (expires_at)`);
+      }
+
+      const { seedPermissions } = await import('../services/seed');
+      const permissionIdMap = await seedPermissions();
+      const permissionNames = [
+        'pipelines:view',
+        'pipelines:view_all',
+        'pipelines:edit',
+        'pipelines:test',
+        'pipelines:run',
+        'pipelines:deploy',
+        'pipelines:delete',
+        'pipelines:metadata',
+        'pipelines:ai_suggest',
+      ];
+      const permissionIds = permissionNames.map((name) => permissionIdMap.get(name));
+      if (!permissionIds.every((id): id is string => typeof id === 'string')) {
+        throw new Error('Failed to resolve Visual Pipelines permission IDs');
+      }
+
+      for (const roleName of [SYSTEM_ROLES.SUPER_ADMIN, SYSTEM_ROLES.ADMIN]) {
+        let roleRows: Array<{ id: string }>;
+        if (dbType === 'sqlite') {
+          roleRows = (db as SqliteDb).all(sql`SELECT id FROM rbac_roles WHERE name = ${roleName} LIMIT 1`) as Array<{ id: string }>;
+        } else {
+          const result = await (db as PostgresDb).execute(sql`SELECT id FROM rbac_roles WHERE name = ${roleName} LIMIT 1`);
+          const rows = result as unknown as { rows?: Array<{ id: string }> };
+          roleRows = Array.isArray(result) ? result as unknown as Array<{ id: string }> : rows.rows ?? [];
+        }
+        if (roleRows.length === 0) continue;
+        const roleId = roleRows[0].id;
+        for (const permissionId of permissionIds) {
+          let exists: boolean;
+          if (dbType === 'sqlite') {
+            exists = (db as SqliteDb).all(sql`SELECT 1 FROM rbac_role_permissions WHERE role_id = ${roleId} AND permission_id = ${permissionId} LIMIT 1`).length > 0;
+          } else {
+            const result = await (db as PostgresDb).execute(sql`SELECT 1 FROM rbac_role_permissions WHERE role_id = ${roleId} AND permission_id = ${permissionId} LIMIT 1`);
+            const rows = result as unknown as { rows?: Array<unknown> };
+            exists = (Array.isArray(result) ? result : rows.rows ?? []).length > 0;
+          }
+          if (exists) continue;
+          const id = randomUUID();
+          if (dbType === 'sqlite') {
+            (db as SqliteDb).run(sql`INSERT INTO rbac_role_permissions (id, role_id, permission_id, created_at) VALUES (${id}, ${roleId}, ${permissionId}, ${Math.floor(Date.now() / 1000)})`);
+          } else {
+            await (db as PostgresDb).execute(sql`INSERT INTO rbac_role_permissions (id, role_id, permission_id, created_at) VALUES (${id}, ${roleId}, ${permissionId}, ${new Date().toISOString()})`);
+          }
+        }
+      }
+
+      logger.info({ module: 'RBAC', phase: 'migration' }, `[Migration 1.53.0] Created Visual Pipelines schema + permissions (${dbType})`);
     },
     down: async () => { /* forward-only */ },
   },

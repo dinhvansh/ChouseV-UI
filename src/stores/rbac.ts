@@ -536,6 +536,17 @@ export const RBAC_PERMISSIONS = {
   DATA_HEALTH_DELETE: 'data_health:delete',
   DATA_HEALTH_RUN: 'data_health:run',
   DATA_HEALTH_VIEW_ALL: 'data_health:view_all',
+
+  // Visual Pipelines (DataOps)
+  PIPELINES_VIEW: 'pipelines:view',
+  PIPELINES_VIEW_ALL: 'pipelines:view_all',
+  PIPELINES_EDIT: 'pipelines:edit',
+  PIPELINES_TEST: 'pipelines:test',
+  PIPELINES_RUN: 'pipelines:run',
+  PIPELINES_DEPLOY: 'pipelines:deploy',
+  PIPELINES_DELETE: 'pipelines:delete',
+  PIPELINES_METADATA: 'pipelines:metadata',
+  PIPELINES_AI_SUGGEST: 'pipelines:ai_suggest',
 } as const;
 
 export type RbacPermission = typeof RBAC_PERMISSIONS[keyof typeof RBAC_PERMISSIONS];

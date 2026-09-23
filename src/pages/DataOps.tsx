@@ -7,19 +7,21 @@
 
 import { useEffect } from "react";
 import { useNavigate, useParams } from "react-router";
-import { CalendarClock, HeartPulse, Workflow } from "lucide-react";
+import { CalendarClock, GitBranch, HeartPulse, Workflow } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { useRbacStore, RBAC_PERMISSIONS } from "@/stores";
 import { DataOpsModelButton } from "@/features/dataops-ai";
 import { ScheduledQueries, SUB_TABS, type SubTab } from "@/features/scheduled-queries";
 import { DataHealth, DATA_HEALTH_SUB_TABS, type DataHealthSubTab } from "@/features/data-health";
+import { Pipelines, PIPELINE_SUB_TABS, type PipelineSubTab } from "@/features/pipelines";
 
-type FeatureKey = "scheduled-queries" | "data-health";
+type FeatureKey = "scheduled-queries" | "data-health" | "pipelines";
 
 const FEATURE_META: Record<FeatureKey, { label: string; icon: React.ElementType; permission: string }> = {
   "scheduled-queries": { label: "Scheduled Queries", icon: CalendarClock, permission: RBAC_PERMISSIONS.SCHEDULED_QUERIES_VIEW },
   "data-health": { label: "Data Health", icon: HeartPulse, permission: RBAC_PERMISSIONS.DATA_HEALTH_VIEW },
+  pipelines: { label: "Pipelines", icon: GitBranch, permission: RBAC_PERMISSIONS.PIPELINES_VIEW },
 };
 
 function FeaturePill({ feature, isActive, onClick }: { feature: FeatureKey; isActive: boolean; onClick: () => void }) {
@@ -54,7 +56,11 @@ export default function DataOps() {
 
   const activeFeature: FeatureKey =
     feature && (availableFeatures as string[]).includes(feature) ? (feature as FeatureKey) : availableFeatures[0] ?? "scheduled-queries";
-  const validSubs: string[] = activeFeature === "data-health" ? DATA_HEALTH_SUB_TABS : SUB_TABS;
+  const validSubs: string[] = activeFeature === "data-health"
+    ? DATA_HEALTH_SUB_TABS
+    : activeFeature === "pipelines"
+      ? PIPELINE_SUB_TABS
+      : SUB_TABS;
   const legacyScheduledDetail = activeFeature === "scheduled-queries" && (sub === "runs" || sub === "lineage");
   const activeSub = sub && validSubs.includes(sub) ? sub : legacyScheduledDetail ? "jobs" : "overview";
 
@@ -112,6 +118,7 @@ export default function DataOps() {
       <div className="min-h-0 flex-1 overflow-hidden" data-onboarding-id="dataops-content">
         {activeFeature === "scheduled-queries" && <ScheduledQueries sub={activeSub as SubTab} onSubChange={setSub} />}
         {activeFeature === "data-health" && <DataHealth sub={activeSub as DataHealthSubTab} onSubChange={setSub} />}
+        {activeFeature === "pipelines" && <Pipelines sub={activeSub as PipelineSubTab} onSubChange={setSub} />}
       </div>
     </div>
   );

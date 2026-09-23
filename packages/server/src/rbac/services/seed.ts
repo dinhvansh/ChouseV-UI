@@ -157,6 +157,17 @@ const PERMISSION_CATEGORIES: Record<string, string[]> = {
     PERMISSIONS.DATA_HEALTH_RUN,
     PERMISSIONS.DATA_HEALTH_VIEW_ALL,
   ],
+  'Visual Pipelines': [
+    PERMISSIONS.PIPELINES_VIEW,
+    PERMISSIONS.PIPELINES_VIEW_ALL,
+    PERMISSIONS.PIPELINES_EDIT,
+    PERMISSIONS.PIPELINES_TEST,
+    PERMISSIONS.PIPELINES_RUN,
+    PERMISSIONS.PIPELINES_DEPLOY,
+    PERMISSIONS.PIPELINES_DELETE,
+    PERMISSIONS.PIPELINES_METADATA,
+    PERMISSIONS.PIPELINES_AI_SUGGEST,
+  ],
 };
 
 // Human-readable permission names
@@ -245,6 +256,15 @@ const PERMISSION_DISPLAY_NAMES: Record<string, string> = {
   [PERMISSIONS.DATA_HEALTH_DELETE]: 'Delete Data Health Promises',
   [PERMISSIONS.DATA_HEALTH_RUN]: 'Manually Run Data Health Promises',
   [PERMISSIONS.DATA_HEALTH_VIEW_ALL]: 'View and Act on All Data Health Promises',
+  [PERMISSIONS.PIPELINES_VIEW]: 'View Visual Pipelines',
+  [PERMISSIONS.PIPELINES_VIEW_ALL]: 'View and Act on All Visual Pipelines',
+  [PERMISSIONS.PIPELINES_EDIT]: 'Create and Edit Visual Pipeline Drafts',
+  [PERMISSIONS.PIPELINES_TEST]: 'Validate and Test Visual Pipelines',
+  [PERMISSIONS.PIPELINES_RUN]: 'Manually Run Visual Pipelines',
+  [PERMISSIONS.PIPELINES_DEPLOY]: 'Deploy and Roll Back Visual Pipelines',
+  [PERMISSIONS.PIPELINES_DELETE]: 'Delete Visual Pipelines',
+  [PERMISSIONS.PIPELINES_METADATA]: 'Edit Visual Pipeline Business Metadata',
+  [PERMISSIONS.PIPELINES_AI_SUGGEST]: 'Use AI Suggestions for Visual Pipelines',
 };
 
 // Role display names and descriptions

@@ -352,6 +352,28 @@ export async function execute(job: ScheduledQueryRow, opts: ExecuteOptions): Pro
     finishedAt,
   });
 
+  if (job.kind === "visual_pipeline" && opts.trigger === "scheduled") {
+    try {
+      const pipelineStore = await import("../pipelines/store");
+      const deployment = await pipelineStore.getDeploymentByRuntimeJobId(job.id);
+      if (deployment) {
+        await pipelineStore.linkRun({
+          runId,
+          pipelineId: deployment.pipelineId,
+          versionId: deployment.versionId,
+          deploymentId: deployment.id,
+          actorId: null,
+          triggerType: "scheduled",
+          triggerPayload: null,
+          externalEventId: null,
+          generatedSql: deployment.artifact.sql,
+        });
+      }
+    } catch (error) {
+      logger.error({ module: "VisualPipelines", jobId: job.id, runId, error: error instanceof Error ? error.message : String(error) }, "Failed to link scheduled pipeline run");
+    }
+  }
+
   const chained = chainActionFor(job, status, opts);
   if (chained === "live" || chained === "replay") {
     await runChainedDataHealth(job, opts.slotAt, window, { replay: chained === "replay" });
