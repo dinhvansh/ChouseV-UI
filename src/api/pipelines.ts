@@ -167,6 +167,17 @@ export interface PipelineRun {
   historySource?: "control_plane";
 }
 
+export interface PipelineWebhookDelivery {
+  id: string;
+  eventId: string;
+  pipelineId: string;
+  source: string;
+  externalEventId: string;
+  payloadHash: string;
+  outcome: "ACCEPTED" | "DUPLICATE" | "IGNORED";
+  receivedAt: number;
+}
+
 export interface PipelineNativeRun {
   id: string;
   deploymentId: string;
@@ -279,7 +290,7 @@ export async function retirePipeline(id: string): Promise<boolean> {
   return response.retired;
 }
 
-export async function listPipelineRuns(id: string): Promise<{ runs: PipelineRun[]; nativeRuns: PipelineNativeRun[] }> {
+export async function listPipelineRuns(id: string): Promise<{ runs: PipelineRun[]; webhookDeliveries: PipelineWebhookDelivery[]; nativeRuns: PipelineNativeRun[] }> {
   return api.get(`/pipelines/${id}/runs`);
 }
 

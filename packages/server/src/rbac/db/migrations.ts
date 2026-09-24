@@ -45,7 +45,7 @@ export interface MigrationResult {
 // Current App Version
 // ============================================
 
-export const APP_VERSION = '1.53.0';
+export const APP_VERSION = '1.54.0';
 
 // ============================================
 // Error Helpers
@@ -5064,6 +5064,45 @@ export const MIGRATIONS: Migration[] = [
       }
 
       logger.info({ module: 'RBAC', phase: 'migration' }, `[Migration 1.53.0] Created Visual Pipelines schema + permissions (${dbType})`);
+    },
+    down: async () => { /* forward-only */ },
+  },
+  {
+    version: '1.54.0',
+    name: 'visual_pipeline_webhook_deliveries',
+    description: 'Record every authenticated pipeline webhook delivery, including duplicate and ignored attempts, without weakening event idempotency.',
+    up: async (db) => {
+      const dbType = getDatabaseType();
+      if (dbType === 'sqlite') {
+        (db as SqliteDb).run(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_webhook_deliveries (
+            id                TEXT PRIMARY KEY NOT NULL,
+            event_id          TEXT NOT NULL REFERENCES visual_pipeline_external_events(id) ON DELETE CASCADE,
+            pipeline_id       TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            source            TEXT NOT NULL,
+            external_event_id TEXT NOT NULL,
+            payload_hash      TEXT NOT NULL,
+            outcome           TEXT NOT NULL,
+            received_at       INTEGER NOT NULL DEFAULT 0
+          )
+        `);
+        (db as SqliteDb).run(sql`CREATE INDEX IF NOT EXISTS vp_webhook_deliveries_pipeline_idx ON visual_pipeline_webhook_deliveries (pipeline_id, received_at)`);
+      } else {
+        await (db as PostgresDb).execute(sql`
+          CREATE TABLE IF NOT EXISTS visual_pipeline_webhook_deliveries (
+            id                TEXT PRIMARY KEY NOT NULL,
+            event_id          TEXT NOT NULL REFERENCES visual_pipeline_external_events(id) ON DELETE CASCADE,
+            pipeline_id       TEXT NOT NULL REFERENCES visual_pipelines(id) ON DELETE CASCADE,
+            source            TEXT NOT NULL,
+            external_event_id TEXT NOT NULL,
+            payload_hash      TEXT NOT NULL,
+            outcome           TEXT NOT NULL,
+            received_at       BIGINT NOT NULL DEFAULT 0
+          )
+        `);
+        await (db as PostgresDb).execute(sql`CREATE INDEX IF NOT EXISTS vp_webhook_deliveries_pipeline_idx ON visual_pipeline_webhook_deliveries (pipeline_id, received_at)`);
+      }
+      logger.info({ module: 'RBAC', phase: 'migration' }, `[Migration 1.54.0] Created webhook delivery history (${dbType})`);
     },
     down: async () => { /* forward-only */ },
   },

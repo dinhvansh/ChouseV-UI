@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, History, Play, Rocket, RotateCcw, Square } from "lucide-react";
+import { Activity, History, Play, Rocket, RotateCcw, Square, Webhook } from "lucide-react";
 import { toast } from "sonner";
 
-import type { PipelineConcurrencyPolicy, PipelineTriggerType } from "@/api/pipelines";
+import type { PipelineConcurrencyPolicy, PipelineTriggerType, PipelineWebhookDelivery } from "@/api/pipelines";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -108,8 +108,43 @@ export function PipelineRuns({ pipelineId }: { pipelineId?: string }) {
   const runsQuery = usePipelineRuns(pipelineId);
   if (!pipelineId) return <EmptySelection label="execution history" />;
   const runs = runsQuery.data?.runs ?? [];
+  const webhookDeliveries = runsQuery.data?.webhookDeliveries ?? [];
   const nativeRuns = runsQuery.data?.nativeRuns ?? [];
-  return <div className="space-y-4"><div className="flex items-center gap-2 text-paper"><Activity className="h-4 w-4 text-brand" /><h3 className="font-medium">Execution history</h3></div>{runs.map((run) => <RunCard key={run.id} title={`${run.triggerType} · ${run.status}`} startedAt={run.startedAt} durationMs={run.durationMs} rows={run.writtenRows ?? run.rowCount} error={run.errorMessage} sql={run.generatedSql} payload={run.triggerPayload} />)}{nativeRuns.map((run) => <RunCard key={run.id} title={`incremental_mv · ${run.status}`} startedAt={run.eventTimeMs} durationMs={run.durationMs} rows={run.writtenRows} error={run.errorMessage} sql={null} payload={{ initialQueryId: run.initialQueryId, viewUuid: run.viewUuid }} />)}{!runsQuery.isLoading && runs.length + nativeRuns.length === 0 && <Card className="rounded-xs border-dashed border-ink-500 bg-ink-100 p-10 text-center text-sm text-paper-muted">No executions recorded yet.</Card>}</div>;
+  return <div className="space-y-6">
+    {webhookDeliveries.length > 0 && <section className="space-y-3">
+      <div className="flex items-center gap-2 text-paper"><Webhook className="h-4 w-4 text-brand" /><h3 className="font-medium">Webhook deliveries</h3></div>
+      {webhookDeliveries.map((delivery) => <WebhookDeliveryCard key={delivery.id} delivery={delivery} />)}
+    </section>}
+    <section className="space-y-4">
+      <div className="flex items-center gap-2 text-paper"><Activity className="h-4 w-4 text-brand" /><h3 className="font-medium">Execution history</h3></div>
+      {runs.map((run) => <RunCard key={run.id} title={`${run.triggerType} · ${run.status}`} startedAt={run.startedAt} durationMs={run.durationMs} rows={run.writtenRows ?? run.rowCount} error={run.errorMessage} sql={run.generatedSql} payload={run.triggerPayload} />)}
+      {nativeRuns.map((run) => <RunCard key={run.id} title={`incremental_mv · ${run.status}`} startedAt={run.eventTimeMs} durationMs={run.durationMs} rows={run.writtenRows} error={run.errorMessage} sql={null} payload={{ initialQueryId: run.initialQueryId, viewUuid: run.viewUuid }} />)}
+      {!runsQuery.isLoading && runs.length + nativeRuns.length + webhookDeliveries.length === 0 && <Card className="rounded-xs border-dashed border-ink-500 bg-ink-100 p-10 text-center text-sm text-paper-muted">No executions or webhook deliveries recorded yet.</Card>}
+    </section>
+  </div>;
+}
+
+function WebhookDeliveryCard({ delivery }: { delivery: PipelineWebhookDelivery }) {
+  const outcomeClass = delivery.outcome === "ACCEPTED"
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+    : delivery.outcome === "DUPLICATE"
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+      : "border-ink-500 bg-ink-50 text-paper-muted";
+  const explanation = delivery.outcome === "ACCEPTED"
+    ? "Accepted; the matching execution appears below."
+    : delivery.outcome === "DUPLICATE"
+      ? "Duplicate ignored safely; the pipeline was not run again."
+      : "Ignored because the webhook did not report a successful job.";
+  return <Card className="rounded-xs border-ink-500 bg-ink-100 p-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <div className="flex items-center gap-2"><Webhook className="h-4 w-4 text-paper-faint" /><p className="text-sm font-medium text-paper">{delivery.source} · {delivery.externalEventId}</p></div>
+        <p className="mt-1 text-xs text-paper-muted">{explanation}</p>
+        <p className="mt-1 font-mono text-[10px] text-paper-faint">{new Date(delivery.receivedAt).toLocaleString()} · hash {delivery.payloadHash.slice(0, 12)}</p>
+      </div>
+      <span className={`rounded-full border px-2 py-1 font-mono text-[10px] ${outcomeClass}`}>{delivery.outcome}</span>
+    </div>
+  </Card>;
 }
 
 function RunCard({ title, startedAt, durationMs, rows, error, sql, payload }: { title: string; startedAt: number; durationMs: number | null; rows: number | null; error: string | null; sql: string | null; payload: unknown }) {

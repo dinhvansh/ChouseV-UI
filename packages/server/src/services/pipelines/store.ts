@@ -14,11 +14,13 @@ import type {
   CreateDeploymentInput,
   PipelineDeploymentStatus,
   PipelineTriggerType,
+  PipelineWebhookDeliveryOutcome,
   PipelineBusinessMetadataRow,
   UpsertPipelineBusinessMetadataInput,
   VisualPipelineDeploymentRow,
   VisualPipelineNativeRunRow,
   VisualPipelineRunRow,
+  VisualPipelineWebhookDeliveryRow,
 } from "./types";
 import type { PipelineDefinition, PipelineDiagnostic, PipelineColumn } from "./definition";
 
@@ -489,6 +491,50 @@ export async function claimIgnoredExternalEvent(
 
 export async function updateExternalEventStatus(id: string, status: string): Promise<void> {
   await run(sql`UPDATE visual_pipeline_external_events SET status = ${status}, processed_at = ${Date.now()} WHERE id = ${id}`);
+}
+
+export async function recordWebhookDelivery(input: {
+  eventId: string;
+  pipelineId: string;
+  source: string;
+  externalEventId: string;
+  payloadHash: string;
+  outcome: PipelineWebhookDeliveryOutcome;
+}): Promise<void> {
+  await run(sql`
+    INSERT INTO visual_pipeline_webhook_deliveries
+      (id, event_id, pipeline_id, source, external_event_id, payload_hash, outcome, received_at)
+    VALUES
+      (${randomUUID()}, ${input.eventId}, ${input.pipelineId}, ${input.source}, ${input.externalEventId},
+       ${input.payloadHash}, ${input.outcome}, ${Date.now()})
+  `);
+}
+
+function webhookDeliveryOutcome(value: unknown): PipelineWebhookDeliveryOutcome {
+  if (value === "ACCEPTED" || value === "DUPLICATE" || value === "IGNORED") return value;
+  throw new Error(`Stored webhook delivery has invalid outcome '${String(value)}'`);
+}
+
+export async function listWebhookDeliveries(
+  pipelineId: string,
+  limit = 50,
+  offset = 0,
+): Promise<VisualPipelineWebhookDeliveryRow[]> {
+  const rows = await all(sql`
+    SELECT * FROM visual_pipeline_webhook_deliveries
+    WHERE pipeline_id = ${pipelineId}
+    ORDER BY received_at DESC LIMIT ${limit} OFFSET ${offset}
+  `);
+  return rows.map((row) => ({
+    id: String(row.id),
+    eventId: String(row.event_id),
+    pipelineId: String(row.pipeline_id),
+    source: String(row.source),
+    externalEventId: String(row.external_event_id),
+    payloadHash: String(row.payload_hash),
+    outcome: webhookDeliveryOutcome(row.outcome),
+    receivedAt: Number(row.received_at ?? 0),
+  }));
 }
 
 function toBusinessMetadataRow(row: Record<string, unknown>): PipelineBusinessMetadataRow {

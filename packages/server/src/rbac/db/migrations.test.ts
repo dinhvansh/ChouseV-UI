@@ -324,6 +324,7 @@ const VERSION_CHECKS: Record<string, () => Promise<void>> = {
       "visual_pipeline_versions",
       "visual_pipeline_deployments",
       "visual_pipeline_external_events",
+      "visual_pipeline_webhook_deliveries",
       "visual_pipeline_business_metadata",
       "visual_pipeline_native_runs",
       "visual_pipeline_run_links",
@@ -355,6 +356,11 @@ const VERSION_CHECKS: Record<string, () => Promise<void>> = {
       WHERE p.name LIKE 'pipelines:%' AND r.name IN ('super_admin', 'admin')
     `);
     expect(new Set(grantRows.map((row) => `${String(row.role_name)}:${String(row.permission_name)}`)).size).toBe(18);
+  },
+  "1.54.0": async () => {
+    expect(await h.tableExists("visual_pipeline_webhook_deliveries")).toBe(true);
+    expect(await h.columnExists("visual_pipeline_webhook_deliveries", "outcome")).toBe(true);
+    expect(await h.indexExists("vp_webhook_deliveries_pipeline_idx")).toBe(true);
   },
 };
 

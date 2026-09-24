@@ -125,6 +125,19 @@ export interface VisualPipelineRunRow {
   finishedAt: number | null;
 }
 
+export type PipelineWebhookDeliveryOutcome = "ACCEPTED" | "DUPLICATE" | "IGNORED";
+
+export interface VisualPipelineWebhookDeliveryRow {
+  id: string;
+  eventId: string;
+  pipelineId: string;
+  source: string;
+  externalEventId: string;
+  payloadHash: string;
+  outcome: PipelineWebhookDeliveryOutcome;
+  receivedAt: number;
+}
+
 export type PipelineMetadataEntityType = "pipeline" | "table" | "column";
 
 export interface PipelineBusinessMetadataRow {

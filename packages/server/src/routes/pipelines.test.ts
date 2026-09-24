@@ -84,9 +84,11 @@ const getActiveDeployment = mock();
 const getDeploymentWebhookSecret = mock();
 const activateDeployment = mock();
 const recordExternalEvent = mock();
+const recordWebhookDelivery = mock();
 const updateExternalEventStatus = mock();
 const listDeployments = mock();
 const listPipelineRuns = mock();
+const listWebhookDeliveries = mock();
 const listNativeRuns = mock();
 const listBusinessMetadata = mock();
 const getUserConnections = mock();
@@ -129,9 +131,11 @@ mock.module("../services/pipelines/store", () => ({
   getDeploymentWebhookSecret,
   activateDeployment,
   recordExternalEvent,
+  recordWebhookDelivery,
   updateExternalEventStatus,
   listDeployments,
   listPipelineRuns,
+  listWebhookDeliveries,
   listNativeRuns,
   listBusinessMetadata,
 }));
@@ -177,9 +181,11 @@ describe("Visual Pipelines routes", () => {
       getDeploymentWebhookSecret,
       activateDeployment,
       recordExternalEvent,
+      recordWebhookDelivery,
       updateExternalEventStatus,
       listDeployments,
       listPipelineRuns,
+      listWebhookDeliveries,
       listNativeRuns,
       listBusinessMetadata,
       getUserConnections,
@@ -196,6 +202,7 @@ describe("Visual Pipelines routes", () => {
     checkTableAccess.mockResolvedValue(true);
     listDeployments.mockResolvedValue([]);
     listPipelineRuns.mockResolvedValue([]);
+    listWebhookDeliveries.mockResolvedValue([]);
     listBusinessMetadata.mockResolvedValue([]);
     app = new Hono();
     app.onError(errorHandler);
@@ -227,6 +234,18 @@ describe("Visual Pipelines routes", () => {
     expect(response.status).toBe(200);
     expect(body.data.versions).toEqual([draft]);
     expect(listVersions).toHaveBeenCalledWith("pipeline-1");
+  });
+
+  it("returns webhook delivery attempts alongside execution history", async () => {
+    getPipelineDetail.mockResolvedValue(pipeline);
+    listDeployments.mockResolvedValue([]);
+    listPipelineRuns.mockResolvedValue([]);
+    listWebhookDeliveries.mockResolvedValue([{ id: "delivery-1", outcome: "DUPLICATE" }]);
+
+    const response = await app.request("/pipelines/pipeline-1/runs");
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).data.webhookDeliveries).toEqual([{ id: "delivery-1", outcome: "DUPLICATE" }]);
   });
 
   it("creates an owner-scoped draft only when the connection is accessible", async () => {
@@ -515,6 +534,10 @@ describe("Visual Pipelines routes", () => {
       externalEventId: "12345",
       externalEventRecordId: "event-row-1",
     }));
+    expect(recordWebhookDelivery).toHaveBeenLastCalledWith(expect.objectContaining({
+      externalEventId: "12345",
+      outcome: "ACCEPTED",
+    }));
 
     recordExternalEvent.mockResolvedValue({ id: "event-row-1", created: false });
     const duplicate = await app.request("/pipelines/pipeline-1/webhook", {
@@ -525,6 +548,10 @@ describe("Visual Pipelines routes", () => {
     expect(duplicate.status).toBe(200);
     expect((await duplicate.json()).data.duplicate).toBe(true);
     expect(executeDeployment).toHaveBeenCalledTimes(1);
+    expect(recordWebhookDelivery).toHaveBeenLastCalledWith(expect.objectContaining({
+      externalEventId: "12345",
+      outcome: "DUPLICATE",
+    }));
   });
 
   it("accepts Airbyte completion payloads through the URL adapter", async () => {
@@ -583,6 +610,10 @@ describe("Visual Pipelines routes", () => {
     expect(executeDeployment).toHaveBeenCalledWith(deployment, expect.objectContaining({
       externalEventId: "airbyte:connection-123:9988",
       triggerPayload: expect.objectContaining({ payload: expect.objectContaining({ data: expect.any(Object) }) }),
+    }));
+    expect(recordWebhookDelivery).toHaveBeenLastCalledWith(expect.objectContaining({
+      externalEventId: "airbyte:connection-123:9988",
+      outcome: "ACCEPTED",
     }));
   });
 });

@@ -187,6 +187,25 @@ describe("visual pipeline store", () => {
     });
     expect(firstEvent.created).toBe(true);
     expect(duplicateEvent).toEqual({ id: firstEvent.id, created: false, status: "RECEIVED" });
+    await store.recordWebhookDelivery({
+      eventId: firstEvent.id,
+      pipelineId: pipeline.id,
+      source: "airbyte",
+      externalEventId: "job-42",
+      payloadHash: "hash",
+      outcome: "ACCEPTED",
+    });
+    await store.recordWebhookDelivery({
+      eventId: duplicateEvent.id,
+      pipelineId: pipeline.id,
+      source: "airbyte",
+      externalEventId: "job-42",
+      payloadHash: "hash",
+      outcome: "DUPLICATE",
+    });
+    const deliveries = await store.listWebhookDeliveries(pipeline.id);
+    expect(deliveries).toHaveLength(2);
+    expect(new Set(deliveries.map((delivery) => delivery.outcome))).toEqual(new Set(["ACCEPTED", "DUPLICATE"]));
     const failedEvent = await store.recordExternalEvent({
       pipelineId: pipeline.id,
       source: "airbyte",

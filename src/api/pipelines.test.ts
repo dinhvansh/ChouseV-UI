@@ -143,7 +143,7 @@ describe("Visual Pipelines API", () => {
       }),
       http.get("/api/pipelines/pipeline-1/deployments", () => HttpResponse.json({ success: true, data: { deployments: [{ id: "deployment-1" }] } })),
       http.post("/api/pipelines/pipeline-1/run", () => HttpResponse.json({ success: true, data: { queued: false, run: { id: "run-1" } } })),
-      http.get("/api/pipelines/pipeline-1/runs", () => HttpResponse.json({ success: true, data: { runs: [{ id: "run-1" }], nativeRuns: [] } })),
+      http.get("/api/pipelines/pipeline-1/runs", () => HttpResponse.json({ success: true, data: { runs: [{ id: "run-1" }], webhookDeliveries: [{ id: "delivery-1", outcome: "DUPLICATE" }], nativeRuns: [] } })),
       http.put("/api/pipelines/pipeline-1/metadata", async ({ request }) => {
         requests.push("metadata");
         return HttpResponse.json({ success: true, data: { id: "metadata-1", ...(await request.json() as object) } });
@@ -155,7 +155,9 @@ describe("Visual Pipelines API", () => {
     expect(deployed.webhookSecret).toBe("one-time");
     expect(await listPipelineDeployments("pipeline-1")).toHaveLength(1);
     expect((await runPipeline("pipeline-1")).run?.id).toBe("run-1");
-    expect((await listPipelineRuns("pipeline-1")).runs).toHaveLength(1);
+    const history = await listPipelineRuns("pipeline-1");
+    expect(history.runs).toHaveLength(1);
+    expect(history.webhookDeliveries[0]?.outcome).toBe("DUPLICATE");
     await savePipelineMetadata("pipeline-1", { entityType: "pipeline", entityKey: "pipeline", description: "Orders mart", businessOwner: null, dataOwner: null, sensitivity: "internal", sourceSystem: "ERP", refreshFrequency: "hourly", businessDefinition: null });
     expect(await listPipelineMetadata("pipeline-1")).toHaveLength(1);
     expect(requests).toEqual(["deploy", "metadata"]);

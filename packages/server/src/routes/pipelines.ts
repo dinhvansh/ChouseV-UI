@@ -130,9 +130,10 @@ async function dispatchWebhookEvent(
   const { pipelineId, deployment } = context;
   const externalEventId = String(payload.external_job_id ?? payload.job_id);
   const payloadHash = createHash("sha256").update(hashMaterial).digest("hex");
+  const source = payload.source.toLowerCase();
   const event = await store.recordExternalEvent({
     pipelineId,
-    source: payload.source.toLowerCase(),
+    source,
     externalEventId,
     payloadHash,
     payload: decoded,
@@ -142,12 +143,17 @@ async function dispatchWebhookEvent(
     const promoted = payload.status === "succeeded" && event.status === "IGNORED"
       ? await store.claimIgnoredExternalEvent(event.id, payloadHash, decoded)
       : false;
-    if (!promoted) return c.json({ success: true, data: { accepted: false, duplicate: true, externalEventId } });
+    if (!promoted) {
+      await store.recordWebhookDelivery({ eventId: event.id, pipelineId, source, externalEventId, payloadHash, outcome: "DUPLICATE" });
+      return c.json({ success: true, data: { accepted: false, duplicate: true, externalEventId } });
+    }
   }
   if (payload.status !== "succeeded") {
     await store.updateExternalEventStatus(event.id, "IGNORED");
+    await store.recordWebhookDelivery({ eventId: event.id, pipelineId, source, externalEventId, payloadHash, outcome: "IGNORED" });
     return c.json({ success: true, data: { accepted: false, duplicate: false, reason: `status_${payload.status}` } });
   }
+  await store.recordWebhookDelivery({ eventId: event.id, pipelineId, source, externalEventId, payloadHash, outcome: "ACCEPTED" });
   try {
     const result = await pipelineRuntime.executeDeployment(deployment, {
       actorId: null,
@@ -589,9 +595,10 @@ pipelines.get("/:id/runs", requirePermission(PERMISSIONS.PIPELINES_VIEW), async 
     deployments.filter((deployment) => deployment.nativeObjectName).map((deployment) => store.listNativeRuns(deployment.id, limit)),
   )).flat().sort((left, right) => right.eventTimeMs - left.eventTimeMs).slice(0, limit);
   const runs = (await store.listPipelineRuns(pipeline.id, limit, offset)).map((run) => ({ ...run, historySource: "control_plane" as const }));
+  const webhookDeliveries = await store.listWebhookDeliveries(pipeline.id, limit, offset);
   return c.json({
     success: true,
-    data: { runs, nativeRuns: nativeRuns.map((run) => ({ ...run, historySource: "clickhouse_query_views_log" as const })) },
+    data: { runs, webhookDeliveries, nativeRuns: nativeRuns.map((run) => ({ ...run, historySource: "clickhouse_query_views_log" as const })) },
   });
 });
 
