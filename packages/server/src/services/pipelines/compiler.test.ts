@@ -163,6 +163,33 @@ describe("compilePipeline", () => {
     expect(result.diagnostics[0]?.code).toBe("definition.invalid");
   });
 
+  it("renders allow-listed function expressions for advanced transforms", () => {
+    const transformed = structuredClone(definition);
+    const calculated = {
+      id: "normalized",
+      type: "calculated" as const,
+      position: { x: 600, y: 0 },
+      config: {
+        columns: [{
+          name: "NormalizedCompany",
+          dataType: "String" as const,
+          expression: {
+            kind: "function" as const,
+            function: "upper" as const,
+            args: [{ kind: "function" as const, function: "trim" as const, args: [{ kind: "column" as const, name: "Company" }] }],
+          },
+        }],
+      },
+    };
+    const destination = transformed.nodes.find((node) => node.type === "destination");
+    if (!destination) throw new Error("Test fixture is missing destination");
+    transformed.nodes.splice(transformed.nodes.length - 1, 0, calculated);
+    transformed.edges.splice(transformed.edges.length - 1, 0, { id: "edge_function", from: "cast_date", to: "normalized", input: "main" });
+    transformed.edges[transformed.edges.length - 1] = { id: "edge_destination", from: "normalized", to: destination.id, input: "main" };
+    const compiled = compilePipeline(transformed, { sourceSchemas });
+    expect(compiled.sql).toContain("CAST(upper(trim(`Company`)), 'String') AS `NormalizedCompany`");
+  });
+
   it("requires a source schema", () => {
     expect(() => compilePipeline(definition, { sourceSchemas: {} })).toThrow("Source schema is required");
   });

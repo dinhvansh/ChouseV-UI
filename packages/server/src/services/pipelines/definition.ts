@@ -58,6 +58,24 @@ export const PIPELINE_BINARY_OPERATORS = [
 
 export type PipelineBinaryOperator = (typeof PIPELINE_BINARY_OPERATORS)[number];
 
+// Calculated expressions use an allow-list so advanced transforms stay
+// auditable and cannot inject arbitrary SQL into a pipeline artifact.
+export const PIPELINE_FUNCTIONS = [
+  "lower",
+  "upper",
+  "trim",
+  "length",
+  "abs",
+  "round",
+  "toDate",
+  "toDateTime",
+  "concat",
+  "coalesce",
+  "ifNull",
+] as const;
+
+export type PipelineFunction = (typeof PIPELINE_FUNCTIONS)[number];
+
 export interface PipelineColumnExpression {
   kind: "column";
   name: string;
@@ -76,10 +94,17 @@ export interface PipelineBinaryExpression {
   right: PipelineExpression;
 }
 
+export interface PipelineFunctionExpression {
+  kind: "function";
+  function: PipelineFunction;
+  args: PipelineExpression[];
+}
+
 export type PipelineExpression =
   | PipelineColumnExpression
   | PipelineLiteralExpression
-  | PipelineBinaryExpression;
+  | PipelineBinaryExpression
+  | PipelineFunctionExpression;
 
 export const pipelineExpressionSchema: z.ZodType<PipelineExpression> = z.lazy(() => z.union([
   z.object({
@@ -96,6 +121,11 @@ export const pipelineExpressionSchema: z.ZodType<PipelineExpression> = z.lazy(()
     operator: z.enum(PIPELINE_BINARY_OPERATORS),
     left: pipelineExpressionSchema,
     right: pipelineExpressionSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("function"),
+    function: z.enum(PIPELINE_FUNCTIONS),
+    args: z.array(pipelineExpressionSchema).min(1).max(16),
   }).strict(),
 ]));
 

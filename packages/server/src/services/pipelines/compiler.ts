@@ -6,6 +6,7 @@ import {
   type PipelineDestinationNode,
   type PipelineDiagnostic,
   type PipelineExpression,
+  type PipelineFunction,
   type PipelineLiteralExpression,
   type PipelineNode,
 } from "./definition";
@@ -139,6 +140,27 @@ function renderExpression(expression: PipelineExpression, context: RenderContext
     context.parameters.push({ name, type, value: expression.value });
     return `{${name}:${type}}`;
   }
+  if (expression.kind === "function") {
+    const args = expression.args.map((argument) => renderExpression(argument, context));
+    const arity = expression.args.length;
+    const unary = new Set<PipelineFunction>(["lower", "upper", "trim", "length", "abs", "toDate", "toDateTime"]);
+    if (unary.has(expression.function) && arity !== 1) {
+      throw compileError("expression.function_arity", `${expression.function} expects exactly one argument`, context.nodeId);
+    }
+    if (expression.function === "ifNull" && arity !== 2) {
+      throw compileError("expression.function_arity", "ifNull expects exactly two arguments", context.nodeId);
+    }
+    if (expression.function === "round" && (arity < 1 || arity > 2)) {
+      throw compileError("expression.function_arity", "round expects one or two arguments", context.nodeId);
+    }
+    if (expression.function === "concat" && arity < 1) {
+      throw compileError("expression.function_arity", "concat expects at least one argument", context.nodeId);
+    }
+    if (expression.function === "coalesce" && arity < 1) {
+      throw compileError("expression.function_arity", "coalesce expects at least one argument", context.nodeId);
+    }
+    return `${expression.function}(${args.join(", ")})`;
+  }
   const left = renderExpression(expression.left, context);
   const right = renderExpression(expression.right, context);
   return `(${left} ${BINARY_SQL[expression.operator]} ${right})`;
@@ -201,6 +223,7 @@ function columnByName(stage: CompiledStage, name: string, nodeId: string): Pipel
 function expressionColumns(expression: PipelineExpression): string[] {
   if (expression.kind === "column") return [expression.name];
   if (expression.kind === "literal") return [];
+  if (expression.kind === "function") return expression.args.flatMap(expressionColumns);
   return [...expressionColumns(expression.left), ...expressionColumns(expression.right)];
 }
 

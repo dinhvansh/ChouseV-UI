@@ -10,6 +10,7 @@ export type PipelineCastType =
 export type PipelineExpression =
   | { kind: "column"; name: string }
   | { kind: "literal"; value: string | number | boolean | null; dataType?: PipelineCastType }
+  | { kind: "function"; function: "lower" | "upper" | "trim" | "length" | "abs" | "round" | "toDate" | "toDateTime" | "concat" | "coalesce" | "ifNull"; args: PipelineExpression[] }
   | {
       kind: "binary";
       operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "and" | "or" | "add" | "subtract" | "multiply" | "divide";

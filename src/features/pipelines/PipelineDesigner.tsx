@@ -342,13 +342,20 @@ export function PipelineDesigner({ pipelineId, onPipelineChange }: PipelineDesig
           <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-paper-faint">Pipeline definition</p>
           <h2 className="mt-1 text-base font-semibold text-paper">Visual transform</h2>
         </div>
+        {immutable && (
+          <div className="rounded-xs border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-200">
+            <p className="font-medium">This version is locked after validation/test.</p>
+            <p className="mt-1 text-amber-100/70">Create the next draft to edit it. The deployed artifact stays unchanged.</p>
+            {canEdit && <Button className="mt-2" size="sm" variant="outline" onClick={() => void createNextDraft()} disabled={mutations.newDraft.isPending}>Create editable draft</Button>}
+          </div>
+        )}
         <Field label="Name"><Input value={fields.name} onChange={(event) => set("name", event.target.value)} disabled={immutable} /></Field>
         <Field label="Description"><Textarea value={fields.description} onChange={(event) => set("description", event.target.value)} disabled={immutable} /></Field>
         {!immutable && <Button type="button" variant="outline" size="sm" onClick={() => {
           if (!advancedMode) setDefinitionText(JSON.stringify(buildDefinition(fields, sourceColumns), null, 2));
           setAdvancedMode((current) => !current);
         }}><Code2 className="h-4 w-4" /> {advancedMode ? "Guided editor" : "Advanced DAG JSON"}</Button>}
-        {advancedMode && !immutable && <Field label="Versioned pipeline definition"><Textarea className="min-h-[420px] font-mono text-xs" value={definitionText} onChange={(event) => setDefinitionText(event.target.value)} spellCheck={false} /><p className="text-[10px] leading-4 text-paper-faint">Supports multiple sources plus calculated, join, union, deduplicate, aggregate, sort, window, and multi-port edges. Save validates the complete schema on the server.</p></Field>}
+        {advancedMode && !immutable && <Field label="Versioned pipeline definition"><Textarea className="min-h-[420px] font-mono text-xs" value={definitionText} onChange={(event) => setDefinitionText(event.target.value)} spellCheck={false} /><p className="text-[10px] leading-4 text-paper-faint">Supports multiple sources, join/union, deduplicate, aggregate, sort, window, and calculated expressions. Function transforms include lower, upper, trim, length, abs, round, toDate, toDateTime, concat, coalesce, and ifNull. Raw SQL is intentionally not accepted; save validates the complete schema on the server.</p></Field>}
         {!advancedMode && <>
           <div className="grid grid-cols-2 gap-2">
             <Field label="Source database">
