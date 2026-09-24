@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  buildAirbyteWebhookUrl,
   buildBashWebhookExample,
   buildPowerShellWebhookExample,
   buildWebhookUrl,
@@ -28,6 +29,7 @@ async function copyText(value: string, label: string): Promise<void> {
 export function WebhookSetupCard({ pipelineId, secret }: WebhookSetupCardProps) {
   const [showSecret, setShowSecret] = useState(false);
   const url = useMemo(() => buildWebhookUrl(window.location.origin, pipelineId), [pipelineId]);
+  const airbyteUrl = useMemo(() => secret ? buildAirbyteWebhookUrl(window.location.origin, pipelineId, secret) : null, [pipelineId, secret]);
   const bashExample = useMemo(() => buildBashWebhookExample(url, "<WEBHOOK_SECRET>"), [url]);
   const powerShellExample = useMemo(() => buildPowerShellWebhookExample(url, "<WEBHOOK_SECRET>"), [url]);
   const runnableBashExample = useMemo(() => buildBashWebhookExample(url, secret ?? "<WEBHOOK_SECRET>"), [secret, url]);
@@ -64,6 +66,15 @@ export function WebhookSetupCard({ pipelineId, secret }: WebhookSetupCardProps) 
         </div>
       </div>
 
+      {airbyteUrl && <div className="space-y-1.5">
+        <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-paper-faint"><Link2 className="h-3 w-3" /> Airbyte endpoint</p>
+        <div className="flex gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-xs border border-cyan-500/30 bg-cyan-500/5 px-3 py-2.5 font-mono text-xs text-cyan-100">{airbyteUrl}</code>
+          <Button type="button" variant="outline" size="sm" onClick={() => void copyText(airbyteUrl, "Airbyte URL")}><Copy className="h-3.5 w-3.5" /> Copy</Button>
+        </div>
+        <p className="text-[11px] text-paper-muted">Paste this URL into Airbyte's webhook notification. The URL contains the deployment secret; rotate it by redeploying the pipeline.</p>
+      </div>}
+
       <div className="space-y-1.5">
         <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-paper-faint"><KeyRound className="h-3 w-3" /> Authentication secret</p>
         {secret ? (
@@ -94,6 +105,7 @@ export function WebhookSetupCard({ pipelineId, secret }: WebhookSetupCardProps) 
           <li><code>X-CHouse-API-Key</code>: the secret above for quick testing.</li>
           <li>JSON body: <code>source</code>, <code>status</code>, and a unique <code>external_job_id</code> or <code>job_id</code>.</li>
           <li>Only <code>status: "succeeded"</code> starts a run; duplicate event IDs are ignored safely.</li>
+          <li>For Airbyte, use the dedicated endpoint above. It accepts Airbyte's completion JSON and maps <code>data.success</code> to the pipeline status.</li>
         </ul>
       </div>
 

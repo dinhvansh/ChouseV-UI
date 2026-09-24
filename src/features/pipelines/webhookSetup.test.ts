@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAirbyteWebhookUrl,
   buildBashWebhookExample,
   buildPowerShellWebhookExample,
   buildWebhookUrl,
@@ -10,6 +11,11 @@ describe("pipeline webhook setup", () => {
   it("builds an absolute encoded endpoint", () => {
     expect(buildWebhookUrl("https://chouse.example/", "pipeline/id"))
       .toBe("https://chouse.example/api/pipelines/pipeline%2Fid/webhook");
+  });
+
+  it("builds an Airbyte URL with an encoded token", () => {
+    expect(buildAirbyteWebhookUrl("https://chouse.example/", "pipeline/id", "secret/value"))
+      .toBe("https://chouse.example/api/pipelines/pipeline%2Fid/webhook/airbyte?token=secret%2Fvalue");
   });
 
   it("builds a runnable Bash API-key example with a unique event id", () => {

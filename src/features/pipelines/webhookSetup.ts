@@ -3,6 +3,11 @@ export function buildWebhookUrl(origin: string, pipelineId: string): string {
   return `${base}/api/pipelines/${encodeURIComponent(pipelineId)}/webhook`;
 }
 
+export function buildAirbyteWebhookUrl(origin: string, pipelineId: string, secret: string): string {
+  const base = origin.replace(/\/$/, "");
+  return `${base}/api/pipelines/${encodeURIComponent(pipelineId)}/webhook/airbyte?token=${encodeURIComponent(secret)}`;
+}
+
 export function buildBashWebhookExample(url: string, secret: string): string {
   return `timestamp=$(date +%s)
 event_id="manual-test-$timestamp"

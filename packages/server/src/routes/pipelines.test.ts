@@ -526,4 +526,63 @@ describe("Visual Pipelines routes", () => {
     expect((await duplicate.json()).data.duplicate).toBe(true);
     expect(executeDeployment).toHaveBeenCalledTimes(1);
   });
+
+  it("accepts Airbyte completion payloads through the URL adapter", async () => {
+    const deployment = {
+      id: "deployment-airbyte",
+      pipelineId: pipeline.id,
+      versionId: draft.id,
+      connectionId: pipeline.connectionId,
+      triggerType: "webhook",
+      triggerConfig: { concurrencyPolicy: "queue_one" },
+      artifact: { compilerVersion: "1", definitionHash: "hash", sql: "SELECT 1", runtimeSql: "SELECT 1", parameters: [], outputColumns: [], lineage: [], destination: { database: "analytics", table: "events_clean", writeMode: "append" } },
+      artifactChecksum: "checksum",
+      runtimeJobId: "job-airbyte",
+      nativeObjectName: null,
+      nativeObjectUuid: null,
+      hasWebhookSecret: true,
+      status: "ACTIVE",
+      deployedBy: "user-1",
+      deployedAt: 1,
+      retiredBy: null,
+      retiredAt: null,
+    } satisfies VisualPipelineDeploymentRow;
+    getActiveDeployment.mockResolvedValue(deployment);
+    getDeploymentWebhookSecret.mockResolvedValue("enc:webhook-secret");
+    recordExternalEvent.mockResolvedValue({ id: "airbyte-event", created: true });
+    executeDeployment.mockResolvedValue({ queued: false, run: { id: "airbyte-run" } });
+    const body = JSON.stringify({
+      data: {
+        connection: { id: "connection-123" },
+        jobId: 9988,
+        success: true,
+        recordsCommitted: 89,
+      },
+    });
+
+    const unauthorized = await app.request("/pipelines/pipeline-1/webhook/airbyte?token=wrong-secret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    expect(unauthorized.status).toBe(401);
+    expect(recordExternalEvent).not.toHaveBeenCalled();
+
+    const response = await app.request("/pipelines/pipeline-1/webhook/airbyte?token=webhook-secret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(recordExternalEvent).toHaveBeenCalledWith(expect.objectContaining({
+      source: "airbyte",
+      externalEventId: "airbyte:connection-123:9988",
+      payload: expect.objectContaining({ source: "airbyte", status: "succeeded" }),
+    }));
+    expect(executeDeployment).toHaveBeenCalledWith(deployment, expect.objectContaining({
+      externalEventId: "airbyte:connection-123:9988",
+      triggerPayload: expect.objectContaining({ payload: expect.objectContaining({ data: expect.any(Object) }) }),
+    }));
+  });
 });

@@ -25,6 +25,8 @@ import { AppError, requireParam } from "../types";
 
 const pipelines = new Hono();
 
+pipelines.post("/:id/webhook/airbyte", async (c) => handleAirbyteWebhook(c));
+
 // The webhook is authenticated with its deployment secret instead of a user
 // session. Register it before the RBAC middleware so machine callbacks can use
 // this one narrowly scoped route.
@@ -87,13 +89,27 @@ const webhookPayloadSchema = z.object({
   message: "external_job_id or job_id is required",
 });
 
+const airbytePayloadSchema = z.object({
+  data: z.object({
+    jobId: z.union([z.string().trim().min(1).max(300), z.number().finite()]),
+    success: z.boolean(),
+    connection: z.object({ id: z.string().trim().min(1).max(300) }).passthrough().optional(),
+  }).passthrough(),
+}).passthrough();
+
 function constantTimeTextEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left, "utf8");
   const rightBuffer = Buffer.from(right, "utf8");
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-async function handlePipelineWebhook(c: Context) {
+interface WebhookContext {
+  pipelineId: string;
+  deployment: VisualPipelineDeploymentRow;
+  secret: string;
+}
+
+async function loadWebhookContext(c: Context): Promise<WebhookContext> {
   const pipelineId = requireParam(c, "id");
   const deployment = await store.getActiveDeployment(pipelineId);
   if (!deployment || deployment.triggerType !== "webhook" || !deployment.runtimeJobId) {
@@ -101,6 +117,56 @@ async function handlePipelineWebhook(c: Context) {
   }
   const encryptedSecret = await store.getDeploymentWebhookSecret(deployment.id);
   if (!encryptedSecret) throw AppError.unauthorized("Webhook authentication failed");
+  return { pipelineId, deployment, secret: decryptSecret(encryptedSecret) };
+}
+
+async function dispatchWebhookEvent(
+  c: Context,
+  context: WebhookContext,
+  decoded: Record<string, unknown>,
+  payload: z.infer<typeof webhookPayloadSchema>,
+  hashMaterial = JSON.stringify(decoded),
+): Promise<Response> {
+  const { pipelineId, deployment } = context;
+  const externalEventId = String(payload.external_job_id ?? payload.job_id);
+  const payloadHash = createHash("sha256").update(hashMaterial).digest("hex");
+  const event = await store.recordExternalEvent({
+    pipelineId,
+    source: payload.source.toLowerCase(),
+    externalEventId,
+    payloadHash,
+    payload: decoded,
+    signatureValid: true,
+  });
+  if (!event.created) {
+    const promoted = payload.status === "succeeded" && event.status === "IGNORED"
+      ? await store.claimIgnoredExternalEvent(event.id, payloadHash, decoded)
+      : false;
+    if (!promoted) return c.json({ success: true, data: { accepted: false, duplicate: true, externalEventId } });
+  }
+  if (payload.status !== "succeeded") {
+    await store.updateExternalEventStatus(event.id, "IGNORED");
+    return c.json({ success: true, data: { accepted: false, duplicate: false, reason: `status_${payload.status}` } });
+  }
+  try {
+    const result = await pipelineRuntime.executeDeployment(deployment, {
+      actorId: null,
+      triggerType: "webhook",
+      triggerPayload: decoded,
+      externalEventId,
+      externalEventRecordId: event.id,
+    });
+    return c.json({ success: true, data: { accepted: true, duplicate: false, queued: result.queued, runId: result.run?.id ?? null } }, result.queued ? 202 : 200);
+  } catch (error) {
+    await store.updateExternalEventStatus(event.id, error instanceof pipelineRuntime.PipelineBusyError ? "SKIPPED" : "FAILED");
+    if (error instanceof pipelineRuntime.PipelineBusyError) throw AppError.conflict(error.message);
+    throw error;
+  }
+}
+
+async function handlePipelineWebhook(c: Context) {
+  const context = await loadWebhookContext(c);
+  const { secret } = context;
   const timestampText = c.req.header("x-chouse-timestamp")?.trim() ?? "";
   const timestamp = Number(timestampText);
   if (!Number.isFinite(timestamp) || Math.abs(Math.floor(Date.now() / 1000) - timestamp) > 300) {
@@ -114,7 +180,6 @@ async function handlePipelineWebhook(c: Context) {
   if (Buffer.byteLength(rawBody, "utf8") > 64 * 1024) {
     throw AppError.badRequest("Webhook payload exceeds the 64 KiB limit");
   }
-  const secret = decryptSecret(encryptedSecret);
   const apiKey = c.req.header("x-chouse-api-key")?.trim();
   const suppliedSignature = c.req.header("x-chouse-signature")?.trim().replace(/^sha256=/i, "");
   const expectedSignature = createHmac("sha256", secret).update(`${timestampText}.${rawBody}`).digest("hex");
@@ -131,42 +196,35 @@ async function handlePipelineWebhook(c: Context) {
     throw AppError.badRequest("Webhook body must be valid JSON");
   }
   const payload = webhookPayloadSchema.parse(decoded);
-  const externalEventId = String(payload.external_job_id ?? payload.job_id);
-  const payloadHash = createHash("sha256").update(rawBody).digest("hex");
-  const event = await store.recordExternalEvent({
-    pipelineId,
-    source: payload.source.toLowerCase(),
-    externalEventId,
-    payloadHash,
-    payload: decoded as Record<string, unknown>,
-    signatureValid: true,
-  });
-  if (!event.created) {
-    const promoted = payload.status === "succeeded" && event.status === "IGNORED"
-      ? await store.claimIgnoredExternalEvent(event.id, payloadHash, decoded as Record<string, unknown>)
-      : false;
-    if (!promoted) {
-      return c.json({ success: true, data: { accepted: false, duplicate: true, externalEventId } });
-    }
+  return dispatchWebhookEvent(c, context, payload, payload, rawBody);
+}
+
+async function handleAirbyteWebhook(c: Context) {
+  const context = await loadWebhookContext(c);
+  const token = c.req.query("token")?.trim() ?? "";
+  if (!token || !constantTimeTextEqual(token, context.secret)) {
+    throw AppError.unauthorized("Airbyte webhook authentication failed");
   }
-  if (payload.status !== "succeeded") {
-    await store.updateExternalEventStatus(event.id, "IGNORED");
-    return c.json({ success: true, data: { accepted: false, duplicate: false, reason: `status_${payload.status}` } });
-  }
+  const contentLength = Number(c.req.header("content-length") ?? "0");
+  if (Number.isFinite(contentLength) && contentLength > 64 * 1024) throw AppError.badRequest("Webhook payload exceeds the 64 KiB limit");
+  const rawBody = await c.req.text();
+  if (Buffer.byteLength(rawBody, "utf8") > 64 * 1024) throw AppError.badRequest("Webhook payload exceeds the 64 KiB limit");
+  let decoded: unknown;
   try {
-    const result = await pipelineRuntime.executeDeployment(deployment, {
-      actorId: null,
-      triggerType: "webhook",
-      triggerPayload: decoded as Record<string, unknown>,
-      externalEventId,
-      externalEventRecordId: event.id,
-    });
-    return c.json({ success: true, data: { accepted: true, duplicate: false, queued: result.queued, runId: result.run?.id ?? null } }, result.queued ? 202 : 200);
-  } catch (error) {
-    await store.updateExternalEventStatus(event.id, error instanceof pipelineRuntime.PipelineBusyError ? "SKIPPED" : "FAILED");
-    if (error instanceof pipelineRuntime.PipelineBusyError) throw AppError.conflict(error.message);
-    throw error;
+    decoded = JSON.parse(rawBody);
+  } catch {
+    throw AppError.badRequest("Webhook body must be valid JSON");
   }
+  const airbyte = airbytePayloadSchema.parse(decoded);
+  const connectionId = airbyte.data.connection?.id ?? "unknown-connection";
+  const externalJobId = `airbyte:${connectionId}:${String(airbyte.data.jobId)}`;
+  const normalized = webhookPayloadSchema.parse({
+    source: "airbyte",
+    status: airbyte.data.success ? "succeeded" : "failed",
+    external_job_id: externalJobId,
+    payload: decoded,
+  });
+  return dispatchWebhookEvent(c, context, normalized, normalized);
 }
 
 function userId(c: Context): string | undefined {

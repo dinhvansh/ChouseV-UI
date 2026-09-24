@@ -48,7 +48,7 @@ const apiProtectionMiddleware = async (c: Context, next: Next) => {
     "/api/rbac/auth/sso",
     "/api/rbac/health",
   ];
-  const isPipelineWebhook = c.req.method === "POST" && /^\/api\/pipelines\/[^/]+\/webhook$/.test(path);
+  const isPipelineWebhook = c.req.method === "POST" && /^\/api\/pipelines\/[^/]+\/webhook(?:\/airbyte)?$/.test(path);
   if (isPipelineWebhook || publicPaths.some(p => path === p || path.startsWith(p + "/"))) {
     await next();
     return;
