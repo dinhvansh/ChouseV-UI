@@ -243,6 +243,7 @@ const destinationNodeSchema = z.object({
     database: z.string().min(1).max(64),
     table: z.string().min(1).max(64),
     writeMode: z.enum(PIPELINE_WRITE_MODES),
+    createIfMissing: z.boolean().optional(),
   }).strict(),
 }).strict();
 

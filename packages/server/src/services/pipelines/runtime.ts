@@ -54,7 +54,10 @@ export function runtimeJobInput(
     outputMode: deployment.artifact.destination.writeMode,
     destDatabase: deployment.artifact.destination.database,
     destTable: deployment.artifact.destination.table,
-    outputConfig: { expectedSchema: deployment.artifact.outputColumns },
+    outputConfig: {
+      expectedSchema: deployment.artifact.outputColumns,
+      createIfMissing: deployment.artifact.destination.createIfMissing === true,
+    },
     maxRows: 1000,
     timeoutSecs: Math.min(3600, Math.max(5, numberConfig(deployment.triggerConfig, "timeoutSecs", 300))),
     useFinal: false,

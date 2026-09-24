@@ -72,4 +72,24 @@ describe("pipeline runtime mapping", () => {
     expect(input.retentionDays).toBe(3650);
     expect(deploymentConcurrencyPolicy({ ...deployment, triggerConfig: null })).toBe("do_not_overlap");
   });
+
+  it("carries managed-destination creation into the materialization runtime", () => {
+    const input = runtimeJobInput("Managed output", null, {
+      ...deployment,
+      artifact: {
+        ...deployment.artifact,
+        destination: {
+          database: "analytics",
+          table: "managed_output",
+          writeMode: "append",
+          createIfMissing: true,
+        },
+      },
+    });
+
+    expect(input.outputConfig).toEqual({
+      expectedSchema: [{ name: "event_id", type: "UInt64" }],
+      createIfMissing: true,
+    });
+  });
 });

@@ -409,6 +409,59 @@ describe("Visual Pipelines routes", () => {
     }));
   });
 
+  it("requires table-create permission and creates a managed destination at deployment", async () => {
+    auth.permissions.push("pipelines:deploy");
+    const managedDefinition: PipelineDefinition = {
+      ...definition,
+      nodes: definition.nodes.map((node) => node.type === "destination"
+        ? { ...node, config: { ...node.config, writeMode: "append", createIfMissing: true } }
+        : node),
+    };
+    const managedCompilation = compilePipeline(managedDefinition, {
+      sourceSchemas: { source: [{ name: "event_id", type: "UInt64" }] },
+    });
+    const tested = {
+      ...draft,
+      id: "33333333-3333-4333-8333-333333333333",
+      definition: managedDefinition,
+      status: "TESTED" as const,
+      definitionHash: pipelineDefinitionHash(managedDefinition),
+      compilerVersion: managedCompilation.compilerVersion,
+      generatedSql: managedCompilation.sql,
+      outputSchema: managedCompilation.outputColumns,
+    };
+    getPipelineDetail.mockResolvedValue({ ...pipeline, draft: tested });
+    getVersion.mockResolvedValue(tested);
+    getActiveDeployment.mockResolvedValue(null);
+    clickHouseQuery.mockResolvedValue({ json: async () => ({ data: [{ name: "event_id", type: "UInt64" }] }) });
+    createRuntimeJob.mockResolvedValue("job-managed");
+    activateDeployment.mockImplementation(async (input: Record<string, unknown>) => ({
+      id: "deployment-managed",
+      ...input,
+      hasWebhookSecret: false,
+      status: "ACTIVE",
+      deployedAt: 10,
+      retiredBy: null,
+      retiredAt: null,
+    }));
+    const request = (): Promise<Response> => app.request("/pipelines/pipeline-1/deploy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ versionId: tested.id, triggerType: "manual" }),
+    });
+
+    let response = await request();
+    expect(response.status).toBe(403);
+    expect(clickHouseCommand).not.toHaveBeenCalled();
+
+    auth.permissions.push("table:create");
+    response = await request();
+    expect(response.status).toBe(201);
+    expect(clickHouseCommand).toHaveBeenCalledWith(expect.objectContaining({
+      query: "CREATE TABLE IF NOT EXISTS `analytics`.`events_clean` (\n  `event_id` UInt64\n) ENGINE = MergeTree\nORDER BY tuple()",
+    }));
+  });
+
   it("authenticates, deduplicates, and executes successful webhooks", async () => {
     const deployment = {
       id: "deployment-1",

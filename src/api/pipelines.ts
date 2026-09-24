@@ -34,7 +34,7 @@ export type PipelineNode =
   | { id: string; type: "aggregate"; position: PipelinePosition; config: { groupBy: string[]; aggregates: Array<{ function: "count" | "sum" | "avg" | "min" | "max" | "uniq" | "uniqExact"; source?: string; alias: string }> } }
   | { id: string; type: "sort"; position: PipelinePosition; config: { columns: PipelineSortColumn[] } }
   | { id: string; type: "window"; position: PipelinePosition; config: { columns: Array<{ function: "row_number" | "rank" | "dense_rank" | "sum" | "avg" | "min" | "max"; source?: string; alias: string; partitionBy: string[]; orderBy: PipelineSortColumn[] }> } }
-  | { id: string; type: "destination"; position: PipelinePosition; config: { database: string; table: string; writeMode: "append" | "replace" | "upsert" } };
+  | { id: string; type: "destination"; position: PipelinePosition; config: { database: string; table: string; writeMode: "append" | "replace" | "upsert"; createIfMissing?: boolean } };
 
 export interface PipelineSortColumn {
   column: string;
@@ -96,7 +96,7 @@ export interface CompiledPipeline {
   sql: string;
   parameters: Array<{ name: string; type: string; value: string | number | boolean | null }>;
   outputColumns: Array<{ name: string; type: string }>;
-  destination: { database: string; table: string; writeMode: "append" | "replace" | "upsert" };
+  destination: { database: string; table: string; writeMode: "append" | "replace" | "upsert"; createIfMissing?: boolean };
   diagnostics: PipelineDiagnostic[];
 }
 
@@ -206,7 +206,7 @@ export interface PipelineSchemaMapping {
   mapping: Array<{
     source: { name: string; type: string };
     destination: { name: string; type: string } | null;
-    status: "matched" | "missing" | "type_mismatch";
+    status: "matched" | "missing" | "type_mismatch" | "will_create";
     suggestedCast: string | null;
   }>;
 }

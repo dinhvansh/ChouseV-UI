@@ -1,4 +1,4 @@
-import type { PipelineDefinition, PipelineDiagnostic, PipelineColumn } from "./definition";
+import type { PipelineColumn, PipelineDefinition, PipelineDestinationNode, PipelineDiagnostic } from "./definition";
 
 export type PipelineVersionStatus = "DRAFT" | "VALIDATED" | "TESTED" | "DEPLOYED" | "ARCHIVED";
 
@@ -67,7 +67,7 @@ export interface PipelineArtifact {
   parameters: Array<{ name: string; type: string; value: string | number | boolean | null }>;
   outputColumns: PipelineColumn[];
   lineage: unknown[];
-  destination: { database: string; table: string; writeMode: "append" | "replace" | "upsert" };
+  destination: PipelineDestinationNode["config"];
 }
 
 export interface VisualPipelineDeploymentRow {

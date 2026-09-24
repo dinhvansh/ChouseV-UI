@@ -19,7 +19,7 @@ import { syncNativeRunHistory } from "../services/pipelines/nativeHistory";
 import type { PipelineArtifact, PipelineConcurrencyPolicy, PipelineTriggerType, VisualPipelineDeploymentRow, VisualPipelineVersionRow } from "../services/pipelines/types";
 import { clientForConnection } from "../services/scheduledQueries/chClient";
 import * as scheduledStore from "../services/scheduledQueries/store";
-import { escapeQualifiedIdentifier } from "../utils/sqlIdentifier";
+import { escapeIdentifier, escapeQualifiedIdentifier, validateColumnType } from "../utils/sqlIdentifier";
 import { logger } from "../utils/logger";
 import { AppError, requireParam } from "../types";
 
@@ -284,6 +284,30 @@ async function cleanupDeploymentRuntime(deployment: VisualPipelineDeploymentRow)
   }
 }
 
+function createDestinationTableSql(artifact: PipelineArtifact): string {
+  if (artifact.outputColumns.length === 0) throw AppError.badRequest("A destination table cannot be created without output columns");
+  const columns = artifact.outputColumns.map((column) => {
+    if (!validateColumnType(column.type)) {
+      throw AppError.badRequest(`Unsupported generated destination type: ${column.type}`);
+    }
+    return `  ${escapeIdentifier(column.name)} ${column.type}`;
+  });
+  return `CREATE TABLE IF NOT EXISTS ${escapeQualifiedIdentifier([artifact.destination.database, artifact.destination.table])} (\n${columns.join(",\n")}\n) ENGINE = MergeTree\nORDER BY tuple()`;
+}
+
+async function ensureManagedDestination(c: Context, connectionId: string, artifact: PipelineArtifact): Promise<void> {
+  if (artifact.destination.createIfMissing !== true) return;
+  const user = getRbacUser(c);
+  if (!isAdmin(c) && !user.permissions.includes(PERMISSIONS.TABLE_CREATE)) {
+    throw AppError.forbidden("Creating a pipeline destination requires the table:create permission");
+  }
+  const client = await clientForConnection(
+    connectionId,
+    JSON.stringify({ rbac_user_id: userId(c) ?? null, source: "visual_pipeline_destination_create" }),
+  );
+  await client.command({ query: createDestinationTableSql(artifact) });
+}
+
 async function deployPipelineVersion(
   c: Context,
   pipeline: Awaited<ReturnType<typeof loadVisiblePipeline>>,
@@ -341,6 +365,7 @@ async function deployPipelineVersion(
   if (artifact.definitionHash !== version.definitionHash) {
     throw AppError.conflict("Deployment artifact does not match the selected pipeline version");
   }
+  await ensureManagedDestination(c, pipeline.connectionId, artifact);
   const artifactChecksum = createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
   const config = triggerConfig(body);
   let runtimeJobId: string | null = null;
@@ -476,12 +501,13 @@ pipelines.get("/:id/schema-mapping", requirePermission(PERMISSIONS.PIPELINES_VIE
   const json = await result.json() as { data?: PipelineColumn[] };
   const destinationColumns = json.data ?? [];
   const outputColumns = version.outputSchema ?? [];
+  const willCreate = destination.config.createIfMissing === true && destinationColumns.length === 0;
   const mapping = outputColumns.map((column) => {
-    const target = destinationColumns.find((candidate) => candidate.name === column.name);
+    const target = willCreate ? column : destinationColumns.find((candidate) => candidate.name === column.name);
     return {
       source: column,
       destination: target ?? null,
-      status: !target ? "missing" : target.type === column.type ? "matched" : "type_mismatch",
+      status: willCreate ? "will_create" : !target ? "missing" : target.type === column.type ? "matched" : "type_mismatch",
       suggestedCast: target && target.type !== column.type ? target.type : null,
     };
   });
