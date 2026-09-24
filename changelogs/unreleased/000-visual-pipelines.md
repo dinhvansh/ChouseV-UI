@@ -7,3 +7,4 @@ type: minor
 
 ### Changed
 - **Schema-driven pipeline editor** — constrains source, column, operator, cast, and destination choices to live ClickHouse metadata, provides structured column selection and renaming, and supports permission-gated creation of a named destination table from the validated output schema.
+- **Webhook deployment setup** — presents the absolute endpoint, masks one-time secrets by default, adds copy actions and runnable PowerShell/Bash examples, documents payload and authentication requirements, and keeps active endpoint guidance visible after reload.

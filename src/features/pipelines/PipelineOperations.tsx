@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useRbacStore, RBAC_PERMISSIONS } from "@/stores";
 import { usePipeline, usePipelineDeployments, usePipelineMutations, usePipelineRuns, usePipelineVersions } from "./hooks";
+import { WebhookSetupCard } from "./WebhookSetupCard";
 
 function EmptySelection({ label }: { label: string }) {
   return <Card className="rounded-xs border-dashed border-ink-500 bg-ink-100 p-10 text-center text-sm text-paper-muted">Open a pipeline from Overview to inspect {label}.</Card>;
@@ -30,12 +31,29 @@ export function PipelineDeployments({ pipelineId }: { pipelineId?: string }) {
   const [cronExpr, setCronExpr] = useState("0 * * * *");
   const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const active = deploymentsQuery.data?.find((deployment) => deployment.status === "ACTIVE");
 
   useEffect(() => {
     if (!versionId && eligibleVersions[0]) setVersionId(eligibleVersions[0].id);
   }, [eligibleVersions, versionId]);
+  useEffect(() => {
+    if (!active) return;
+    setVersionId(active.versionId);
+    setTriggerType(active.triggerType);
+    const policy = active.triggerConfig?.concurrencyPolicy;
+    if (policy === "do_not_overlap" || policy === "queue_one" || policy === "allow_parallel") {
+      setConcurrencyPolicy(policy);
+    }
+    const activeCron = active.triggerConfig?.cronExpr;
+    if (typeof activeCron === "string") setCronExpr(activeCron);
+    const activeTimezone = active.triggerConfig?.timezone;
+    if (typeof activeTimezone === "string") setTimezone(activeTimezone);
+  }, [active]);
+  useEffect(() => {
+    setWebhookSecret(null);
+  }, [pipelineId]);
   if (!pipelineId) return <EmptySelection label="deployments" />;
-  const active = deploymentsQuery.data?.find((deployment) => deployment.status === "ACTIVE");
+  const activeWebhook = active?.triggerType === "webhook" && active.hasWebhookSecret;
 
   const deploy = async (): Promise<void> => {
     if (!versionId) return;
@@ -69,12 +87,12 @@ export function PipelineDeployments({ pipelineId }: { pipelineId?: string }) {
         </div>
         {(triggerType === "schedule" || triggerType === "refreshable_mv") && <div className="mt-3 max-w-sm"><Field label="Cron expression"><Input value={cronExpr} onChange={(event) => setCronExpr(event.target.value)} /></Field></div>}
         <div className="mt-4 flex flex-wrap gap-2">
-          {canDeploy && <Button onClick={() => void deploy()} disabled={!versionId || mutations.deploy.isPending}><Rocket className="h-4 w-4" /> Deploy</Button>}
-          {canRun && active?.runtimeJobId && <Button variant="outline" onClick={() => void mutations.run.mutateAsync(pipelineId).then((result) => toast.success(result.queued ? "Run queued" : "Run completed")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Run failed"))}><Play className="h-4 w-4" /> Run now</Button>}
+          {canDeploy && <Button onClick={() => void deploy()} disabled={!versionId || mutations.deploy.isPending}><Rocket className="h-4 w-4" /> {active ? "Redeploy" : "Deploy"}</Button>}
+          {canRun && active?.runtimeJobId && <Button variant="outline" onClick={() => void mutations.run.mutateAsync(pipelineId).then((result) => toast.success(result.queued ? "Run queued" : "Run completed")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Run failed"))}><Play className="h-4 w-4" /> Run manually</Button>}
           {canDeploy && active && <Button variant="outline" onClick={() => void mutations.retire.mutateAsync(pipelineId).then(() => toast.success("Deployment retired")).catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Retire failed"))}><Square className="h-4 w-4" /> Retire</Button>}
         </div>
       </Card>
-      {webhookSecret && <Card className="rounded-xs border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100"><p className="font-medium">Copy this webhook secret now. It is shown only once.</p><code className="mt-2 block break-all rounded-xs bg-ink-50 p-3 font-mono text-xs">{webhookSecret}</code><p className="mt-2 text-xs">POST `/api/pipelines/{pipelineId}/webhook` with `X-CHouse-Timestamp` and either `X-CHouse-API-Key` or HMAC `X-CHouse-Signature`.</p></Card>}
+      {(webhookSecret || activeWebhook) && <WebhookSetupCard pipelineId={pipelineId} secret={webhookSecret} />}
       <div className="space-y-2">
           {deploymentsQuery.data?.map((deployment) => (
           <Card key={deployment.id} className="rounded-xs border-ink-500 bg-ink-100 p-4">
